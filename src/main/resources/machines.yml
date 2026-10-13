@@ -1,0 +1,41 @@
+machines:
+  wheat_farm:
+    enabled: true
+    block: FARMLAND
+    display_name: '&eWheat Farm'
+    production_time: 10
+    energy_usage: 0
+    input: {}
+    output: {WHEAT: 5}
+  mill:
+    enabled: true
+    block: STONECUTTER
+    display_name: '&6Mill'
+    production_time: 10
+    energy_usage: 5
+    input: {WHEAT: 2}
+    output: {BREAD: 1}
+  iron_factory:
+    enabled: true
+    block: BLAST_FURNACE
+    display_name: '&7Iron Factory'
+    production_time: 30
+    energy_usage: 20
+    input: {IRON_ORE: 10, COAL: 5}
+    output: {IRON_INGOT: 15}
+  gold_factory:
+    enabled: true
+    block: BLAST_FURNACE
+    display_name: '&6Gold Factory'
+    production_time: 45
+    energy_usage: 30
+    input: {RAW_GOLD: 10, COAL: 5}
+    output: {GOLD_INGOT: 12}
+upgrade:
+  max_level: 5
+  levels:
+    1: {production_time_multiplier: 1.0, output_multiplier: 1.0, energy_multiplier: 1.0, cost: 0}
+    2: {production_time_multiplier: 0.833333, output_multiplier: 1.25, energy_multiplier: 1.10, cost: 100000}
+    3: {production_time_multiplier: 0.666667, output_multiplier: 1.50, energy_multiplier: 1.25, cost: 500000}
+    4: {production_time_multiplier: 0.50, output_multiplier: 2.00, energy_multiplier: 1.50, cost: 2500000}
+    5: {production_time_multiplier: 0.333333, output_multiplier: 3.00, energy_multiplier: 1.75, cost: 10000000}
