@@ -22,6 +22,9 @@ final class TycoonService {
     private final KyouTycoon p; private final Database db;
     final Map<UUID,PlayerData> players=new ConcurrentHashMap<>(); final Map<Integer,Plot> plots=new ConcurrentHashMap<>(); final Map<UUID,Machine> machines=new ConcurrentHashMap<>(); final Map<UUID,Warehouse> warehouses=new ConcurrentHashMap<>(); final Map<UUID,Energy> energies=new ConcurrentHashMap<>(); final Map<String,MachineDef> defs=new ConcurrentHashMap<>(); final Map<Material,Double> shop=new ConcurrentHashMap<>();
     final Map<Material,Double> marketMult=new ConcurrentHashMap<>();
+    final Set<UUID> dirtyMachines=ConcurrentHashMap.newKeySet();
+    final Set<UUID> dirtyWarehouses=ConcurrentHashMap.newKeySet();
+    final Set<UUID> dirtyEnergies=ConcurrentHashMap.newKeySet();
     final Map<UUID,Long> offlineStarted=new ConcurrentHashMap<>();
     TycoonService(KyouTycoon p,Database db){this.p=p;this.db=db;}
     void load(){loadPlayers();loadPlots();loadMachines();loadConfigData();}
@@ -32,7 +35,55 @@ final class TycoonService {
     private Map<Material,Integer> items(ConfigurationSection s){Map<Material,Integer> x=new HashMap<>();if(s==null)return x;for(String k:s.getKeys(false)){Material m=Material.matchMaterial(k);if(m!=null)x.put(m,Math.max(1,s.getInt(k)));}return x;}
     void savePlayer(UUID u){PlayerData d=players.get(u);if(d==null)return;db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO players(uuid,name,balance,revenue,expense,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,balance=excluded.balance,revenue=excluded.revenue,expense=excluded.expense,last_seen=excluded.last_seen")){q.setString(1,u.toString());q.setString(2,d.name());q.setDouble(3,d.balance());q.setDouble(4,d.revenue());q.setDouble(5,d.expense());q.setLong(6,System.currentTimeMillis()/1000);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Player save: "+e.getMessage());}});}
     void saveMachine(Machine m){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO machines(uuid,owner_uuid,world,x,y,z,machine_type,level,state,progress,created_at,last_processed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET state=excluded.state,progress=excluded.progress,last_processed=excluded.last_processed,level=excluded.level")){q.setString(1,m.id.toString());q.setString(2,m.owner.toString());q.setString(3,m.world);q.setInt(4,m.x);q.setInt(5,m.y);q.setInt(6,m.z);q.setString(7,m.type);q.setInt(8,m.level);q.setString(9,m.state.name());q.setDouble(10,m.progress);q.setLong(11,m.createdAt);q.setLong(12,m.lastProcessed);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Machine save: "+e.getMessage());}});}
-    void saveAll(){players.keySet().forEach(this::savePlayer);machines.values().forEach(this::saveMachine);}
+    void saveAll(){
+        List<PlayerData> playerSnapshot=new ArrayList<>(players.values());
+        List<Machine> machineSnapshot=machines.values().stream().map(m->new Machine(m.id,m.owner,m.world,m.x,m.y,m.z,m.type,m.level,m.state,m.progress,m.createdAt,m.lastProcessed)).toList();
+        Map<UUID,Warehouse> warehouseSnapshot=new HashMap<>();
+        warehouses.forEach((u,w)->{Warehouse copy=new Warehouse(w.capacity);copy.items.putAll(w.items);warehouseSnapshot.put(u,copy);});
+        Map<UUID,Energy> energySnapshot=new HashMap<>();
+        energies.forEach((u,e)->{Energy copy=new Energy(e.capacity);copy.stored=e.stored;energySnapshot.put(u,copy);});
+        db.executor().execute(()->{
+            synchronized(db){
+                Connection c=db.c();
+                boolean oldAuto=true;
+                try{
+                    oldAuto=c.getAutoCommit();
+                    c.setAutoCommit(false);
+                    try(PreparedStatement q=c.prepareStatement("INSERT INTO players(uuid,name,balance,revenue,expense,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,balance=excluded.balance,revenue=excluded.revenue,expense=excluded.expense,last_seen=excluded.last_seen")){
+                        for(PlayerData d:playerSnapshot){q.setString(1,d.uuid().toString());q.setString(2,d.name());q.setDouble(3,d.balance());q.setDouble(4,d.revenue());q.setDouble(5,d.expense());q.setLong(6,System.currentTimeMillis()/1000);q.addBatch();}q.executeBatch();
+                    }
+                    try(PreparedStatement q=c.prepareStatement("INSERT INTO machines(uuid,owner_uuid,world,x,y,z,machine_type,level,state,progress,created_at,last_processed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET state=excluded.state,progress=excluded.progress,last_processed=excluded.last_processed,level=excluded.level")){
+                        for(Machine m:machineSnapshot){q.setString(1,m.id.toString());q.setString(2,m.owner.toString());q.setString(3,m.world);q.setInt(4,m.x);q.setInt(5,m.y);q.setInt(6,m.z);q.setString(7,m.type);q.setInt(8,m.level);q.setString(9,m.state.name());q.setDouble(10,m.progress);q.setLong(11,m.createdAt);q.setLong(12,m.lastProcessed);q.addBatch();}q.executeBatch();
+                    }
+                    try(PreparedStatement q=c.prepareStatement("INSERT INTO warehouses(owner_uuid,capacity,items) VALUES(?,?,?) ON CONFLICT(owner_uuid) DO UPDATE SET capacity=excluded.capacity,items=excluded.items")){
+                        for(var e:warehouseSnapshot.entrySet()){q.setString(1,e.getKey().toString());q.setInt(2,e.getValue().capacity);q.setString(3,serializeItems(e.getValue().items));q.addBatch();}q.executeBatch();
+                    }
+                    try(PreparedStatement q=c.prepareStatement("INSERT INTO player_energy(owner_uuid,stored,capacity) VALUES(?,?,?) ON CONFLICT(owner_uuid) DO UPDATE SET stored=excluded.stored,capacity=excluded.capacity")){
+                        for(var e:energySnapshot.entrySet()){q.setString(1,e.getKey().toString());q.setInt(2,e.getValue().stored);q.setInt(3,e.getValue().capacity);q.addBatch();}q.executeBatch();
+                    }
+                    c.commit();
+                    dirtyMachines.clear();dirtyWarehouses.clear();dirtyEnergies.clear();
+                }catch(Exception e){
+                    try{c.rollback();}catch(SQLException ignored){}
+                    p.getLogger().warning("Batch save failed: "+e.getMessage());
+                }finally{
+                    try{c.setAutoCommit(oldAuto);}catch(SQLException ignored){}
+                }
+            }
+        });
+    }
+    private String serializeItems(Map<Material,Integer> items){
+        return items.entrySet().stream().filter(e->e.getValue()>0).sorted(Map.Entry.comparingByKey(Comparator.comparing(Enum::name)))
+            .map(e->e.getKey().name()+"="+e.getValue()).collect(java.util.stream.Collectors.joining(";"));
+    }
+    private void loadItems(Warehouse target,String encoded){
+        if(encoded==null||encoded.isBlank())return;
+        for(String part:encoded.split(";")){
+            int cut=part.indexOf('=');if(cut<1)continue;
+            Material m=Material.matchMaterial(part.substring(0,cut));if(m==null)continue;
+            try{int amount=Integer.parseInt(part.substring(cut+1));if(amount>0)target.add(m,amount);}catch(NumberFormatException ignored){}
+        }
+    }
     void ensurePlayer(Player pl){players.computeIfAbsent(pl.getUniqueId(),u->{double b=p.getConfig().getDouble("economy.starting_balance",10000);PlayerData d=new PlayerData(u,pl.getName(),b,0,0,System.currentTimeMillis()/1000);savePlayer(u);return d;});}
     double balance(UUID u){return players.getOrDefault(u,new PlayerData(u,"",0,0,0,0)).balance();}
     void setBalance(UUID u,double b){PlayerData d=players.get(u);if(d!=null)players.put(u,new PlayerData(u,d.name(),Math.max(0,b),d.revenue(),d.expense(),d.lastSeen()));}
@@ -104,8 +155,17 @@ final class TycoonService {
     Machine createMachine(Player pl,Block b,String type){MachineDef d=defs.get(type);if(d==null)return null;Machine m=new Machine(UUID.randomUUID(),pl.getUniqueId(),b.getWorld().getName(),b.getX(),b.getY(),b.getZ(),type,1,State.IDLE,0,System.currentTimeMillis()/1000,System.currentTimeMillis()/1000);machines.put(m.id,m);saveMachine(m);return m;}
     Machine machine(Block b){for(Machine m:machines.values())if(m.world.equals(b.getWorld().getName())&&m.x==b.getX()&&m.y==b.getY()&&m.z==b.getZ())return m;return null;}
     int machineCount(UUID u){return (int)machines.values().stream().filter(m->m.owner.equals(u)).count();}
-    Warehouse warehouse(UUID u){return warehouses.computeIfAbsent(u,k->new Warehouse(p.getConfig().getInt("warehouse.starting_capacity",500)));}
-    Energy energy(UUID u){return energies.computeIfAbsent(u,k->new Energy(p.getConfig().getInt("energy.default_capacity",100)));}
+    Warehouse warehouse(UUID u){return warehouses.computeIfAbsent(u,k->{
+        int capacity=p.getConfig().getInt("warehouse.starting_capacity",500);
+        Warehouse w=new Warehouse(capacity);
+        synchronized(db){try(PreparedStatement q=db.c().prepareStatement("SELECT capacity,items FROM warehouses WHERE owner_uuid=?")){q.setString(1,k.toString());try(ResultSet r=q.executeQuery()){if(r.next()){w.capacity=Math.max(0,r.getInt("capacity"));loadItems(w,r.getString("items"));}}}catch(Exception e){p.getLogger().warning("Warehouse load: "+e.getMessage());}}
+        return w;
+    });}
+    Energy energy(UUID u){return energies.computeIfAbsent(u,k->{
+        Energy e=new Energy(Math.max(0,p.getConfig().getInt("energy.default_capacity",100)));
+        synchronized(db){try(PreparedStatement q=db.c().prepareStatement("SELECT stored,capacity FROM player_energy WHERE owner_uuid=?")){q.setString(1,k.toString());try(ResultSet r=q.executeQuery()){if(r.next()){e.capacity=Math.max(0,r.getInt("capacity"));e.stored=Math.max(0,Math.min(e.capacity,r.getInt("stored")));}}}catch(Exception ex){p.getLogger().warning("Energy load: "+ex.getMessage());}}
+        return e;
+    });}
     void markOffline(UUID owner){offlineStarted.putIfAbsent(owner,System.currentTimeMillis()/1000);}
     void markOnline(UUID owner){offlineStarted.remove(owner);}
     void processMachines(){
@@ -155,10 +215,15 @@ final class TycoonService {
                 m.state=done>0?State.RUNNING:m.state;
             }
             m.lastProcessed=now;
-            if(done>0)saveMachine(m);
+            if(done>0)dirtyMachines.add(m.id);
         }
     }
-    boolean produce(Machine m,MachineDef d){Warehouse w=warehouse(m.owner);for(var e:d.input.entrySet())if(w.amount(e.getKey())<e.getValue()){m.state=State.WAITING_INPUT;return false;}double om=p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".output_multiplier",1);for(var e:d.output.entrySet())if(w.total()+(int)Math.ceil(e.getValue()*om)>w.capacity){m.state=State.WAITING_OUTPUT;return false;}int energy=(int)Math.ceil(d.energy*p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".energy_multiplier",1));if(p.getConfig().getBoolean("energy.enabled",true)&&!energy(m.owner).consume(energy)){m.state=State.NO_POWER;return false;}for(var e:d.input.entrySet())w.remove(e.getKey(),e.getValue());for(var e:d.output.entrySet())w.add(e.getKey(),(int)Math.ceil(e.getValue()*om));return true;}
+    boolean produce(Machine m,MachineDef d){Warehouse w=warehouse(m.owner);for(var e:d.input.entrySet())if(w.amount(e.getKey())<e.getValue()){m.state=State.WAITING_INPUT;return false;}double om=p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".output_multiplier",1);for(var e:d.output.entrySet())if(w.total()+(int)Math.ceil(e.getValue()*om)>w.capacity){m.state=State.WAITING_OUTPUT;return false;}int energy=(int)Math.ceil(d.energy*p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".energy_multiplier",1));if(p.getConfig().getBoolean("energy.enabled",true)&&!energy(m.owner).consume(energy)){m.state=State.NO_POWER;return false;}
+        if(energy>0)dirtyEnergies.add(m.owner);
+        for(var e:d.input.entrySet())w.remove(e.getKey(),e.getValue());
+        for(var e:d.output.entrySet())w.add(e.getKey(),(int)Math.ceil(e.getValue()*om));
+        dirtyWarehouses.add(m.owner);
+        return true;}
     double marketPrice(Material m){return shop.getOrDefault(m,0d)*marketMult.getOrDefault(m,1d);}
     void marketTick(){if(!p.getConfig().getBoolean("market.dynamic_price",true))return;double min=p.getConfig().getDouble("market.minimum_price_multiplier",.5),max=p.getConfig().getDouble("market.maximum_price_multiplier",2);for(Material m:marketMult.keySet())marketMult.put(m,Math.max(min,Math.min(max,marketMult.get(m)+(Math.random()-.5)*.05)));}
     Company company(UUID u){try(PreparedStatement q=db.c().prepareStatement("SELECT c.* FROM companies c JOIN company_members m ON c.id=m.company_id WHERE m.player_uuid=?")){q.setString(1,u.toString());try(ResultSet r=q.executeQuery()){if(!r.next())return null;return new Company(r.getLong("id"),r.getString("name"),UUID.fromString(r.getString("owner_uuid")),r.getDouble("revenue"),r.getDouble("assets"),r.getInt("reputation"),r.getLong("created_at"));}}catch(Exception e){return null;}}
