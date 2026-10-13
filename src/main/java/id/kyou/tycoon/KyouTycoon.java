@@ -35,15 +35,47 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     @EventHandler public void join(PlayerJoinEvent e){service.markOnline(e.getPlayer().getUniqueId());service.ensurePlayer(e.getPlayer());}
     @EventHandler public void quit(PlayerQuitEvent e){service.markOffline(e.getPlayer().getUniqueId());service.savePlayer(e.getPlayer().getUniqueId());}
     @EventHandler public void interact(PlayerInteractEvent e){
-        if(e.getClickedBlock()==null)return; Block b=e.getClickedBlock();TycoonService.Machine m=service.machine(b);if(m==null)return;e.setCancelled(true);
-        if(!m.owner.equals(e.getPlayer().getUniqueId())){e.getPlayer().sendMessage(msg("not_your_plot"));return;}gui.machine(e.getPlayer(),m);
+        Block b=e.getClickedBlock();
+        if(b==null||!isProtectedArea(e.getPlayer(),b.getWorld(),b.getX(),b.getZ()))return;
+        TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());
+        TycoonService.Machine m=service.machine(b);
+        if(m!=null){
+            e.setCancelled(true);
+            if(!m.owner.equals(e.getPlayer().getUniqueId())){e.getPlayer().sendMessage(msg("not_your_plot"));return;}
+            gui.machine(e.getPlayer(),m);
+            return;
+        }
+        if(getConfig().getBoolean("world_protection.interact",true)){
+            boolean owns=q!=null&&e.getPlayer().getUniqueId().equals(q.owner);
+            boolean container=b.getState() instanceof org.bukkit.block.Container;
+            if(container&&!owns)e.setCancelled(true);
+            if(q!=null&&(q.owner==null||!e.getPlayer().getUniqueId().equals(q.owner)))e.setCancelled(true);
+        }
     }
     @EventHandler public void place(BlockPlaceEvent e){
-        Player p=e.getPlayer();Block b=e.getBlock();TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());
-        if(q!=null&&q.owner!=null&&q.owner.equals(p.getUniqueId())){TycoonService.MachineDef d=service.defs.values().stream().filter(x->x.block()==b.getType()).findFirst().orElse(null);if(d!=null&&d.enabled()&&service.machineCount(p.getUniqueId())<getConfig().getInt("plot.max_machines_by_level."+q.level,30))service.createMachine(p,b,d.id());}
-        if(isProtectedArea(p,b.getWorld(),b.getX(),b.getZ())&&q!=null&&q.owner!=null&&!q.owner.equals(p.getUniqueId()))e.setCancelled(true);
+        if(!isProtectedArea(e.getPlayer(),e.getBlock().getWorld(),e.getBlockX(),e.getBlockZ()))return;
+        if(!getConfig().getBoolean("world_protection.block_place",true))return;
+        TycoonService.Plot q=service.at(e.getBlock().getWorld(),e.getBlockX(),e.getBlockZ());
+        if(q==null||q.owner==null||!q.owner.equals(e.getPlayer().getUniqueId())){
+            e.setCancelled(true);
+            e.getPlayer().sendMessage(msg(q==null?"road_protected":"not_your_plot"));
+        }
+        // A block is not automatically converted to a machine: vanilla blocks remain vanilla
+        // unless the owner explicitly registers the block via /tycoon machine register <id>.
     }
-    @EventHandler public void breakBlock(BlockBreakEvent e){Block b=e.getBlock();TycoonService.Machine m=service.machine(b);if(m!=null&&!m.owner.equals(e.getPlayer().getUniqueId())){e.setCancelled(true);return;}if(isProtectedArea(e.getPlayer(),b.getWorld(),b.getX(),b.getZ())){TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());if(q!=null&&q.owner!=null&&!q.owner.equals(e.getPlayer().getUniqueId()))e.setCancelled(true);}}
+    @EventHandler public void breakBlock(BlockBreakEvent e){
+        Block b=e.getBlock();
+        boolean tycoonWorld=isProtectedArea(e.getPlayer(),b.getWorld(),b.getX(),b.getZ());
+        TycoonService.Plot q=tycoonWorld?service.at(b.getWorld(),b.getX(),b.getZ()):null;
+        TycoonService.Machine m=service.machine(b);
+        if(m!=null&&!m.owner.equals(e.getPlayer().getUniqueId())){e.setCancelled(true);return;}
+        if(tycoonWorld&&getConfig().getBoolean("world_protection.block_break",true)){
+            if(q==null||q.owner==null||!q.owner.equals(e.getPlayer().getUniqueId())){
+                e.setCancelled(true);e.getPlayer().sendMessage(msg(q==null?"road_protected":"not_your_plot"));return;
+            }
+        }
+        if(m!=null&&m.owner.equals(e.getPlayer().getUniqueId()))service.removeMachine(b);
+    }
     @EventHandler public void inventory(InventoryClickEvent e){String t=e.getView().getTitle();if(t.contains("KyouTycoon")||t.contains("Machine")||t.contains("Warehouse"))e.setCancelled(true);}
     @EventHandler public void damage(EntityDamageByEntityEvent e){if(!getConfig().getBoolean("world_protection.pvp",false))if(e.getEntity().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world"))&&e.getDamager() instanceof org.bukkit.entity.Player)e.setCancelled(true);}
     @EventHandler public void spawn(CreatureSpawnEvent e){if(!getConfig().getBoolean("world_protection.mob_spawn",false)&&e.getLocation().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world")))e.setCancelled(true);}
