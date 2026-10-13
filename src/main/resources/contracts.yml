@@ -1,0 +1,3 @@
+contracts:
+  bakery_contract: {requirement: {BREAD: 1000}, reward: 150000, reputation: 5, duration: 3600}
+  iron_contract: {requirement: {IRON_INGOT: 500}, reward: 125000, reputation: 4, duration: 3600}
