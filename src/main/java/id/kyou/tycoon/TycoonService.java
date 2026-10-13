@@ -74,8 +74,9 @@ final class TycoonService {
         Material roadMat=mat(p.getConfig().getString("world.road.material"),Material.STONE_BRICKS);
         Material center=mat(p.getConfig().getString("world.road.center_material"),Material.WHITE_CONCRETE);
         // Horizontal roads: exactly the configured number of blocks between plot rows.
+        Set<Integer> roadRows=new HashSet<>();
         for(PlotLayout.Bounds b:layout){
-            if(b.maxZ()>=maxZ)continue;
+            if(b.maxZ()>=maxZ||!roadRows.add(b.maxZ()))continue;
             int start=b.maxZ()+1;
             for(int z=start;z<start+road;z++){
                 for(int x=minX;x<=maxX;x++){
@@ -86,8 +87,9 @@ final class TycoonService {
             }
         }
         // Vertical roads: exactly the configured number of blocks between plot columns.
+        Set<Integer> roadColumns=new HashSet<>();
         for(PlotLayout.Bounds b:layout){
-            if(b.maxX()>=maxX)continue;
+            if(b.maxX()>=maxX||!roadColumns.add(b.maxX()))continue;
             int start=b.maxX()+1;
             for(int x=start;x<start+road;x++){
                 for(int z=minZ;z<=maxZ;z++){
