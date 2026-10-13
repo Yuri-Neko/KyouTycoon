@@ -1,0 +1,10 @@
+sell:
+  WHEAT: {price: 20}
+  BREAD: {price: 100}
+  IRON_INGOT: {price: 250}
+  GOLD_INGOT: {price: 750}
+  COPPER_INGOT: {price: 80}
+  DIAMOND: {price: 5000}
+  REDSTONE: {price: 75}
+  QUARTZ: {price: 150}
+  CAKE: {price: 1000}
