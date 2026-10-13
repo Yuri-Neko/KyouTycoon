@@ -6,6 +6,13 @@ import org.bukkit.block.Block;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import id.kyou.tycoon.economy.ContractManager;
+import id.kyou.tycoon.progression.AchievementManager;
+import id.kyou.tycoon.progression.PrestigeManager;
+import id.kyou.tycoon.progression.ResearchManager;
+import id.kyou.tycoon.company.CompanyManager;
+import id.kyou.tycoon.company.CompanyRole;
+import id.kyou.tycoon.company.EmployeeManager;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,6 +32,10 @@ final class TycoonService {
     private final KyouTycoon p; private final Database db;
     final Map<UUID,PlayerData> players=new ConcurrentHashMap<>(); final Map<Integer,Plot> plots=new ConcurrentHashMap<>(); final Map<UUID,Machine> machines=new ConcurrentHashMap<>(); final Map<UUID,Warehouse> warehouses=new ConcurrentHashMap<>(); final Map<UUID,Energy> energies=new ConcurrentHashMap<>(); final Map<String,MachineDef> defs=new ConcurrentHashMap<>(); final Map<Material,Double> shop=new ConcurrentHashMap<>();
     final Map<Material,Double> marketMult=new ConcurrentHashMap<>();
+    private volatile ContractManager contractManager;
+    private final Map<UUID,Double> researchBonusCache=new ConcurrentHashMap<>();
+    private final Map<UUID,Double> prestigeBonusCache=new ConcurrentHashMap<>();
+    private final Map<UUID,ConcurrentHashMap<Material,Long>> pendingContractOutputs=new ConcurrentHashMap<>();
     final Set<UUID> dirtyMachines=ConcurrentHashMap.newKeySet();
     final Set<UUID> dirtyWarehouses=ConcurrentHashMap.newKeySet();
     final Set<UUID> dirtyEnergies=ConcurrentHashMap.newKeySet();
@@ -34,7 +45,55 @@ final class TycoonService {
     private void loadPlayers(){try(Statement s=db.c().createStatement();ResultSet r=s.executeQuery("SELECT * FROM players")){while(r.next()){UUID u=UUID.fromString(r.getString("uuid"));players.put(u,new PlayerData(u,r.getString("name"),r.getDouble("balance"),r.getDouble("revenue"),r.getDouble("expense"),r.getLong("last_seen")));}}catch(Exception e){p.getLogger().warning("Player load: "+e.getMessage());}}
     private void loadPlots(){try(Statement s=db.c().createStatement();ResultSet r=s.executeQuery("SELECT * FROM plots ORDER BY id")){while(r.next()){String o=r.getString("owner_uuid");Plot x=new Plot(r.getInt("id"),r.getString("world"),r.getInt("min_x"),r.getInt("max_x"),r.getInt("min_z"),r.getInt("max_z"),o==null?null:UUID.fromString(o),r.getInt("level"),r.getLong("created_at"));plots.put(x.id,x);}}catch(Exception e){p.getLogger().warning("Plot load: "+e.getMessage());}}
     private void loadMachines(){try(Statement s=db.c().createStatement();ResultSet r=s.executeQuery("SELECT * FROM machines")){while(r.next()){Machine m=new Machine(UUID.fromString(r.getString("uuid")),UUID.fromString(r.getString("owner_uuid")),r.getString("world"),r.getInt("x"),r.getInt("y"),r.getInt("z"),r.getString("machine_type"),r.getInt("level"),State.valueOf(r.getString("state")),r.getDouble("progress"),r.getLong("created_at"),r.getLong("last_processed"));machines.put(m.id,m);}}catch(Exception e){p.getLogger().warning("Machine load: "+e.getMessage());}}
-    void loadConfigData(){defs.clear();ConfigurationSection s=p.getConfigManager().machines().getConfigurationSection("machines");if(s!=null)for(String id:s.getKeys(false)){String b="machines."+id;Material mat=Material.matchMaterial(p.getConfigManager().machines().getString(b+".block","STONE"));if(mat==null)continue;defs.put(id,new MachineDef(id,mat,p.getConfigManager().machines().getString(b+".display_name",id),Math.max(1,p.getConfigManager().machines().getLong(b+".production_time",10)),Math.max(0,p.getConfigManager().machines().getInt(b+".energy_usage",0)),items(p.getConfigManager().machines().getConfigurationSection(b+".input")),items(p.getConfigManager().machines().getConfigurationSection(b+".output")),p.getConfigManager().machines().getBoolean(b+".enabled",true)));}shop.clear();ConfigurationSection sh=p.getConfigManager().shops().getConfigurationSection("sell");if(sh!=null)for(String k:sh.getKeys(false)){Material m=Material.matchMaterial(k);if(m!=null)shop.put(m,p.getConfigManager().shops().getDouble(k+".price"));}for(Material m:shop.keySet())marketMult.putIfAbsent(m,1d);}
+    void loadConfigData(){
+        defs.clear();
+        ConfigurationSection root=p.getConfigManager().machines().getConfigurationSection("machines");
+        if(root!=null){
+            for(String id:root.getKeys(false)){
+                String path="machines."+id;
+                Material material=Material.matchMaterial(p.getConfigManager().machines().getString(path+".block","STONE"));
+                if(material==null){p.getLogger().warning("Ignoring machine "+id+": invalid block material.");continue;}
+                defs.put(id,new MachineDef(id,material,
+                    p.getConfigManager().machines().getString(path+".display_name",id),
+                    Math.max(1,p.getConfigManager().machines().getLong(path+".production_time",10)),
+                    Math.max(0,p.getConfigManager().machines().getInt(path+".energy_usage",0)),
+                    items(p.getConfigManager().machines().getConfigurationSection(path+".input")),
+                    items(p.getConfigManager().machines().getConfigurationSection(path+".output")),
+                    p.getConfigManager().machines().getBoolean(path+".enabled",true)));
+            }
+        }
+        shop.clear();
+        ConfigurationSection sell=p.getConfigManager().shops().getConfigurationSection("sell");
+        if(sell!=null){
+            for(String key:sell.getKeys(false)){
+                Material material=Material.matchMaterial(key);
+                double price=sell.getDouble(key+".price",-1);
+                if(material!=null&&Double.isFinite(price)&&price>=0)shop.put(material,price);
+                else p.getLogger().warning("Ignoring invalid shop item: "+key);
+            }
+        }
+        for(Material material:shop.keySet())marketMult.putIfAbsent(material,1d);
+        List<ContractManager.ContractDefinition> loadedContracts=new ArrayList<>();
+        ConfigurationSection contractRoot=p.getConfigManager().contracts().getConfigurationSection("contracts");
+        if(contractRoot!=null&&p.getConfig().getBoolean("contracts.enabled",true)){
+            for(String id:contractRoot.getKeys(false)){
+                String path="contracts."+id;
+                if(!p.getConfigManager().contracts().getBoolean(path+".enabled",true))continue;
+                Map<Material,Integer> requirements=items(p.getConfigManager().contracts().getConfigurationSection(path+".requirement"));
+                if(requirements.isEmpty()){p.getLogger().warning("Ignoring contract "+id+": no valid requirements.");continue;}
+                try{
+                    loadedContracts.add(new ContractManager.ContractDefinition(id,requirements,
+                        Math.max(0,p.getConfigManager().contracts().getDouble(path+".reward",0)),
+                        p.getConfigManager().contracts().getInt(path+".reputation",0),
+                        Math.max(1,p.getConfigManager().contracts().getLong(path+".duration",p.getConfig().getLong("contracts.default_duration",3600)))));
+                }catch(IllegalArgumentException ex){p.getLogger().warning("Ignoring invalid contract "+id+": "+ex.getMessage());}
+            }
+        }
+        contractManager=new ContractManager(db.c(),loadedContracts,
+            p.getConfig().getInt("reputation.minimum",0),p.getConfig().getInt("reputation.maximum",100));
+        researchBonusCache.clear();
+        prestigeBonusCache.clear();
+    }
     private Map<Material,Integer> items(ConfigurationSection s){
         Map<Material,Integer> x=new HashMap<>();
         if(s==null)return x;
@@ -104,7 +163,7 @@ final class TycoonService {
     boolean withdraw(UUID u,double a){PlayerData d=players.get(u);if(d==null||a<0||d.balance()<a)return false;players.put(u,new PlayerData(u,d.name(),d.balance()-a,d.revenue(),d.expense()+a,d.lastSeen()));return true;}
     void deposit(UUID u,double a){PlayerData d=players.get(u);if(d!=null)players.put(u,new PlayerData(u,d.name(),d.balance()+a,d.revenue()+a,d.expense(),d.lastSeen()));}
     Plot plot(UUID u){return plots.values().stream().filter(x->u.equals(x.owner)).findFirst().orElse(null);} Plot at(World w,int x,int z){return plots.values().stream().filter(q->q.world.equals(w.getName())&&q.contains(x,z)).findFirst().orElse(null);}
-    Plot claim(UUID u){if(plot(u)!=null)return null;Plot x=plots.values().stream().filter(q->q.owner==null).min(Comparator.comparingInt(q->q.id)).orElse(null);if(x==null)return null;x.owner=u;savePlot(x);return x;}
+    Plot claim(UUID u){if(plot(u)!=null)return null;Plot x=plots.values().stream().filter(q->q.owner==null).min(Comparator.comparingInt(q->q.id)).orElse(null);if(x==null)return null;x.owner=u;savePlot(x);unlockAchievement(u,"first_plot");return x;}
     void savePlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("UPDATE plots SET owner_uuid=?,level=? WHERE id=?")){q.setString(1,x.owner==null?null:x.owner.toString());q.setInt(2,x.level);q.setInt(3,x.id);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot save: "+e.getMessage());}});}
     void generatePlots(World w){
         int px=p.getConfig().getInt("world.plots_x",10),pz=p.getConfig().getInt("world.plots_z",10);
@@ -176,6 +235,8 @@ final class TycoonService {
         machines.put(m.id,m);
         persistMachineIdentity(b,m);
         saveMachine(m);
+        unlockAchievement(pl.getUniqueId(),"first_machine");
+        if(machineCount(pl.getUniqueId())>=10)unlockAchievement(pl.getUniqueId(),"industrialist");
         return m;
     }
     private void persistMachineIdentity(Block block,Machine m){
@@ -250,7 +311,9 @@ final class TycoonService {
                 continue;
             }
             long offlineSince=isOnline?now:offlineStarted.computeIfAbsent(m.owner,ignored->m.lastProcessed);
-            long cycleSeconds=Math.max(1,Math.round(d.seconds()*p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".production_time_multiplier",1)));
+            double levelMultiplier=p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".production_time_multiplier",1);
+            double bonus=Math.min(0.90,researchSpeedBonus(m.owner)+prestigeSpeedBonus(m.owner));
+            long cycleSeconds=Math.max(1,Math.round(d.seconds()*levelMultiplier*(1.0-bonus)));
             OfflineProductionCalculator.Result timing=OfflineProductionCalculator.calculate(
                 m.progress, m.lastProcessed, now, offlineSince, isOnline, playerOfflineMeansPaused, maxOffline, cycleSeconds);
             long cycles=timing.completeCycles();
@@ -278,6 +341,7 @@ final class TycoonService {
             m.lastProcessed=now;
             if(done>0)dirtyMachines.add(m.id);
         }
+        flushContractProgress();
     }
     private boolean isGenerator(String type){return p.getConfig().getConfigurationSection("energy.generators."+type)!=null;}
     private boolean produceEnergy(Machine m){
@@ -307,7 +371,11 @@ final class TycoonService {
     boolean produce(Machine m,MachineDef d){Warehouse w=warehouse(m.owner);for(var e:d.input.entrySet())if(w.amount(e.getKey())<e.getValue()){m.state=State.WAITING_INPUT;return false;}double om=p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".output_multiplier",1);for(var e:d.output.entrySet())if(w.total()+(int)Math.ceil(e.getValue()*om)>w.capacity){m.state=State.WAITING_OUTPUT;return false;}int energy=(int)Math.ceil(d.energy*p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".energy_multiplier",1));if(p.getConfig().getBoolean("energy.enabled",true)&&!energy(m.owner).consume(energy)){m.state=State.NO_POWER;return false;}
         if(energy>0)dirtyEnergies.add(m.owner);
         for(var e:d.input.entrySet())w.remove(e.getKey(),e.getValue());
-        for(var e:d.output.entrySet())w.add(e.getKey(),(int)Math.ceil(e.getValue()*om));
+        for(var e:d.output.entrySet()){
+            int produced=(int)Math.ceil(e.getValue()*om);
+            w.add(e.getKey(),produced);
+            recordContractOutput(m.owner,e.getKey(),produced);
+        }
         dirtyWarehouses.add(m.owner);
         return true;}
     int warehouseAmount(UUID owner,Material type){return warehouse(owner).amount(type);}
@@ -373,5 +441,20 @@ final class TycoonService {
     Company company(UUID u){try(PreparedStatement q=db.c().prepareStatement("SELECT c.* FROM companies c JOIN company_members m ON c.id=m.company_id WHERE m.player_uuid=?")){q.setString(1,u.toString());try(ResultSet r=q.executeQuery()){if(!r.next())return null;return new Company(r.getLong("id"),r.getString("name"),UUID.fromString(r.getString("owner_uuid")),r.getDouble("revenue"),r.getDouble("assets"),r.getInt("reputation"),r.getLong("created_at"));}}catch(Exception e){return null;}}
     Company createCompany(UUID u,String name){try{if(company(u)!=null)return null;try(PreparedStatement q=db.c().prepareStatement("INSERT INTO companies(name,owner_uuid,created_at) VALUES(?,?,?)",Statement.RETURN_GENERATED_KEYS)){q.setString(1,name);q.setString(2,u.toString());q.setLong(3,System.currentTimeMillis()/1000);q.executeUpdate();try(ResultSet r=q.getGeneratedKeys()){long id=r.next()?r.getLong(1):-1;try(PreparedStatement m=db.c().prepareStatement("INSERT INTO company_members(company_id,player_uuid,role,joined_at) VALUES(?,?,?,?)")){m.setLong(1,id);m.setString(2,u.toString());m.setString(3,"CEO");m.setLong(4,System.currentTimeMillis()/1000);m.executeUpdate();}return new Company(id,name,u,0,0,50,System.currentTimeMillis()/1000);}}}catch(Exception e){p.getLogger().warning("Company create: "+e.getMessage());return null;}}
     int prestige(UUID u){try(PreparedStatement q=db.c().prepareStatement("SELECT level FROM prestige WHERE player_uuid=?")){q.setString(1,u.toString());try(ResultSet r=q.executeQuery()){return r.next()?r.getInt(1):0;}}catch(Exception e){return 0;}}
-    boolean prestige(UUID u,double value){if(!p.getConfig().getBoolean("prestige.enabled",true)||value<p.getConfig().getDouble("prestige.minimum_company_value"))return false;int n=prestige(u)+1;try(PreparedStatement q=db.c().prepareStatement("INSERT INTO prestige(player_uuid,level) VALUES(?,?) ON CONFLICT(player_uuid) DO UPDATE SET level=excluded.level")){q.setString(1,u.toString());q.setInt(2,n);q.executeUpdate();if(p.getConfig().getBoolean("prestige.reset.money",true))setBalance(u,p.getConfig().getDouble("economy.starting_balance"));return true;}catch(Exception e){return false;}}
+    boolean prestige(UUID u,double value){
+        synchronized(db){
+            try{
+                PrestigeManager manager=new PrestigeManager(db.c(),p.getConfig());
+                PrestigeManager.PrestigeResult result=manager.prestige(u,value,System.currentTimeMillis()/1000);
+                if(!result.success())return false;
+                if(p.getConfig().getBoolean("prestige.reset.machines",true))machines.values().removeIf(m->m.owner.equals(u));
+                if(p.getConfig().getBoolean("prestige.reset.warehouse",true)){warehouses.remove(u);dirtyWarehouses.remove(u);}
+                if(p.getConfig().getBoolean("prestige.reset.research",true))researchBonusCache.remove(u);
+                prestigeBonusCache.remove(u);
+                if(p.getConfig().getBoolean("prestige.reset.machines",true))dirtyMachines.removeIf(id->!machines.containsKey(id));
+                refreshPlayerFromDatabase(u);
+                return true;
+            }catch(Exception e){p.getLogger().warning("Prestige failed: "+e.getMessage());return false;}
+        }
+    }
 }
