@@ -1,0 +1,101 @@
+plugin:
+  debug: false
+database:
+  file: kyoutycoon.db
+world:
+  enabled: true
+  name: tycoon_world
+  type: FLAT
+  plots_x: 10
+  plots_z: 10
+  plot_size: 100
+  road_size: 7
+  spawn_center: true
+  ground:
+    material: GRASS_BLOCK
+  road:
+    enabled: true
+    material: STONE_BRICKS
+    border_material: STONE
+    center_material: WHITE_CONCRETE
+    slab_material: STONE_SLAB
+  decoration:
+    enabled: true
+    material: OAK_LEAVES
+    height: 2
+  hub:
+    size: 15
+    material: STONE_BRICKS
+world_protection:
+  block_break: true
+  block_place: true
+  interact: true
+  container: true
+  pvp: false
+  damage: true
+  mob_spawn: false
+plot:
+  starting_level: 1
+  starting_claim: true
+  upgrade_costs: {2: 100000, 3: 500000, 4: 2500000, 5: 10000000}
+  max_machines_by_level: {1: 30, 2: 50, 3: 100, 4: 250, 5: 500}
+economy:
+  starting_balance: 10000
+  tax_rate: 0.0
+offline_machine:
+  player_offline: false
+  maximum_offline_time: 21600
+  consume_energy: true
+  pay_employee: true
+  contract_timer: true
+  stop_when_storage_full: true
+machines:
+  update_interval: 20
+  processing_batch: 100
+  max_loaded_machines: 10000
+warehouse:
+  starting_capacity: 500
+  upgrades: {1: {capacity: 500, cost: 0}, 2: {capacity: 2500, cost: 100000}, 3: {capacity: 10000, cost: 1000000}, 4: {capacity: 50000, cost: 10000000}, 5: {capacity: 250000, cost: 100000000}}
+energy:
+  enabled: true
+  default_capacity: 100
+  generators:
+    coal_generator: {block: FURNACE, production: 100, fuel: {COAL: 100}}
+market:
+  enabled: true
+  dynamic_price: true
+  minimum_price_multiplier: 0.50
+  maximum_price_multiplier: 2.00
+  price_update_interval: 300
+employees:
+  pay_interval: 3600
+  worker: {salary: 500, production_bonus: 0.05}
+  engineer: {salary: 2000, production_speed_bonus: 0.10}
+  manager: {salary: 5000, revenue_bonus: 0.10}
+  logistics: {salary: 4000, transport_bonus: 0.20}
+research:
+  enabled: true
+company:
+  enabled: true
+  max_members: 20
+contracts:
+  enabled: true
+reputation: {starting: 50, minimum: 0, maximum: 100}
+prestige:
+  enabled: true
+  minimum_company_value: 10000000000
+  reset: {money: true, machines: true, warehouse: true, research: true, employees: true}
+  keep: {prestige_level: true, achievements: true}
+  bonuses: {production_per_level: 0.05, revenue_per_level: 0.02}
+achievements:
+  enabled: true
+gui:
+  main_size: 27
+  machine_size: 27
+  warehouse_size: 54
+performance:
+  async_database: true
+  batch_database_save: true
+  database_save_interval: 300
+  machine_processing_batch: 100
+  max_loaded_machines: 10000
