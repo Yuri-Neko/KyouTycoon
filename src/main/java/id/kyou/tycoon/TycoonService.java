@@ -161,7 +161,7 @@ final class TycoonService {
     double balance(UUID u){return players.getOrDefault(u,new PlayerData(u,"",0,0,0,0)).balance();}
     void setBalance(UUID u,double b){PlayerData d=players.get(u);if(d!=null)players.put(u,new PlayerData(u,d.name(),Math.max(0,b),d.revenue(),d.expense(),d.lastSeen()));}
     boolean withdraw(UUID u,double a){PlayerData d=players.get(u);if(d==null||a<0||d.balance()<a)return false;players.put(u,new PlayerData(u,d.name(),d.balance()-a,d.revenue(),d.expense()+a,d.lastSeen()));return true;}
-    void deposit(UUID u,double a){PlayerData d=players.get(u);if(d!=null)players.put(u,new PlayerData(u,d.name(),d.balance()+a,d.revenue()+a,d.expense(),d.lastSeen()));}
+    void deposit(UUID u,double a){PlayerData d=players.get(u);if(d!=null){players.put(u,new PlayerData(u,d.name(),d.balance()+a,d.revenue()+a,d.expense(),d.lastSeen()));checkMoneyAchievements(u);}}
     Plot plot(UUID u){return plots.values().stream().filter(x->u.equals(x.owner)).findFirst().orElse(null);} Plot at(World w,int x,int z){return plots.values().stream().filter(q->q.world.equals(w.getName())&&q.contains(x,z)).findFirst().orElse(null);}
     Plot claim(UUID u){if(plot(u)!=null)return null;Plot x=plots.values().stream().filter(q->q.owner==null).min(Comparator.comparingInt(q->q.id)).orElse(null);if(x==null)return null;x.owner=u;savePlot(x);unlockAchievement(u,"first_plot");return x;}
     void savePlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("UPDATE plots SET owner_uuid=?,level=? WHERE id=?")){q.setString(1,x.owner==null?null:x.owner.toString());q.setInt(2,x.level);q.setInt(3,x.id);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot save: "+e.getMessage());}});}
@@ -434,6 +434,270 @@ final class TycoonService {
     }
     private void recordTransaction(UUID owner,String type,double amount,String note){
         db.executor().execute(()->{synchronized(db){try(PreparedStatement q=db.c().prepareStatement("INSERT INTO transactions(player_uuid,type,amount,note,created_at) VALUES(?,?,?,?,?)")){q.setString(1,owner.toString());q.setString(2,type);q.setDouble(3,amount);q.setString(4,note);q.setLong(5,System.currentTimeMillis()/1000);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Transaction save: "+e.getMessage());}}});
+    }
+
+    private void refreshPlayerFromDatabase(UUID uuid) throws SQLException {
+        try(PreparedStatement query=db.c().prepareStatement("SELECT name,balance,revenue,expense,last_seen FROM players WHERE uuid=?")){
+            query.setString(1,uuid.toString());
+            try(ResultSet rows=query.executeQuery()){
+                if(rows.next())players.put(uuid,new PlayerData(uuid,rows.getString("name"),rows.getDouble("balance"),
+                    rows.getDouble("revenue"),rows.getDouble("expense"),rows.getLong("last_seen")));
+            }
+        }
+    }
+
+    ResearchManager.UnlockResult unlockResearch(UUID player,String researchId){
+        synchronized(db){
+            try{
+                ResearchManager manager=new ResearchManager(db.c(),p.getConfigManager().research());
+                ResearchManager.UnlockResult result=manager.unlock(player,researchId,System.currentTimeMillis()/1000);
+                if(result==ResearchManager.UnlockResult.UNLOCKED){
+                    researchBonusCache.remove(player);
+                    refreshPlayerFromDatabase(player);
+                }
+                return result;
+            }catch(Exception e){p.getLogger().warning("Research unlock failed: "+e.getMessage());return ResearchManager.UnlockResult.INVALID;}
+        }
+    }
+
+    List<String> researchIds(){
+        ConfigurationSection section=p.getConfigManager().research().getConfigurationSection("research");
+        if(section==null||!p.getConfig().getBoolean("research.enabled",true))return List.of();
+        return section.getKeys(false).stream().filter(id->p.getConfigManager().research().getBoolean("research."+id+".enabled",true)).sorted().toList();
+    }
+
+    Set<String> researchUnlocked(UUID player){
+        synchronized(db){
+            try{return Set.copyOf(new ResearchManager(db.c(),p.getConfigManager().research()).unlocked(player));}
+            catch(SQLException e){p.getLogger().warning("Research list failed: "+e.getMessage());return Set.of();}
+        }
+    }
+
+    private double researchSpeedBonus(UUID player){
+        return researchBonusCache.computeIfAbsent(player,id->{
+            synchronized(db){
+                try{return new ResearchManager(db.c(),p.getConfigManager().research()).productionSpeedBonus(id);}
+                catch(SQLException e){p.getLogger().warning("Research bonus lookup failed: "+e.getMessage());return 0d;}
+            }
+        });
+    }
+
+    private double prestigeSpeedBonus(UUID player){
+        return prestigeBonusCache.computeIfAbsent(player,id->{
+            synchronized(db){
+                try{return new PrestigeManager(db.c(),p.getConfig()).productionBonus(id);}
+                catch(SQLException e){p.getLogger().warning("Prestige bonus lookup failed: "+e.getMessage());return 0d;}
+            }
+        });
+    }
+
+    boolean unlockAchievement(UUID player,String id){
+        boolean unlocked;
+        synchronized(db){
+            try{unlocked=new AchievementManager(db.c(),p.getConfig()).unlock(player,id,System.currentTimeMillis()/1000);}
+            catch(SQLException e){p.getLogger().warning("Achievement save failed: "+e.getMessage());return false;}
+        }
+        if(unlocked&&p.getConfig().getBoolean("notifications.achievement_unlocked",true)){
+            Player online=Bukkit.getPlayer(player);
+            if(online!=null){
+                String name=p.getConfig().getString("achievements.items."+id+".name",id);
+                online.sendMessage(p.msg("achievement_unlocked",Map.of("name",name)));
+            }
+        }
+        return unlocked;
+    }
+
+    private void checkMoneyAchievements(UUID player){
+        double value=balance(player);
+        if(value>=1_000_000)unlockAchievement(player,"millionaire");
+        if(value>=10_000_000)unlockAchievement(player,"tycoon");
+    }
+
+    private void recordContractOutput(UUID owner,Material material,int amount){
+        if(amount<1||contractManager==null||!p.getConfig().getBoolean("contracts.enabled",true))return;
+        pendingContractOutputs.computeIfAbsent(owner,ignored->new ConcurrentHashMap<>())
+            .merge(material,(long)amount,(left,right)->left>Long.MAX_VALUE-right?Long.MAX_VALUE:left+right);
+    }
+
+    private void flushContractProgress(){
+        ContractManager manager=contractManager;
+        if(manager==null||pendingContractOutputs.isEmpty())return;
+        Map<UUID,Map<Material,Long>> batch=new HashMap<>();
+        pendingContractOutputs.forEach((owner,pending)->{
+            if(pendingContractOutputs.remove(owner,pending)&&!pending.isEmpty())batch.put(owner,Map.copyOf(pending));
+        });
+        if(batch.isEmpty())return;
+        long now=System.currentTimeMillis()/1000;
+        db.executor().execute(()->{
+            synchronized(db){
+                for(var playerBatch:batch.entrySet()){
+                    for(var output:playerBatch.getValue().entrySet()){
+                        int amount=(int)Math.min(Integer.MAX_VALUE,output.getValue());
+                        try{manager.recordProduction(playerBatch.getKey(),output.getKey(),amount,now);}
+                        catch(SQLException e){p.getLogger().warning("Contract progress save failed: "+e.getMessage());}
+                    }
+                }
+            }
+        });
+    }
+
+    List<ContractManager.ContractDefinition> contractDefinitions(){
+        ContractManager manager=contractManager;
+        return manager==null?List.of():manager.definitions();
+    }
+
+    boolean acceptContract(UUID player,String contractId){
+        ContractManager manager=contractManager;
+        if(manager==null)return false;
+        synchronized(db){
+            try{return manager.accept(player,contractId,System.currentTimeMillis()/1000);}
+            catch(SQLException e){p.getLogger().warning("Contract accept failed: "+e.getMessage());return false;}
+        }
+    }
+
+    List<ContractManager.ContractStatus> activeContracts(UUID player){
+        ContractManager manager=contractManager;
+        if(manager==null)return List.of();
+        synchronized(db){
+            try{return manager.active(player,System.currentTimeMillis()/1000);}
+            catch(SQLException e){p.getLogger().warning("Contract list failed: "+e.getMessage());return List.of();}
+        }
+    }
+
+    Optional<ContractManager.Completion> completeContract(UUID player,String contractId){
+        ContractManager manager=contractManager;
+        if(manager==null)return Optional.empty();
+        synchronized(db){
+            try{
+                Optional<ContractManager.Completion> result=manager.complete(player,contractId,System.currentTimeMillis()/1000);
+                if(result.isPresent()&&result.get().success())refreshPlayerFromDatabase(player);
+                return result;
+            }catch(SQLException e){p.getLogger().warning("Contract completion failed: "+e.getMessage());return Optional.empty();}
+        }
+    }
+
+    void expireContracts(){
+        ContractManager manager=contractManager;
+        if(manager==null)return;
+        synchronized(db){
+            try{manager.expireDue(System.currentTimeMillis()/1000);}
+            catch(SQLException e){p.getLogger().warning("Contract expiry failed: "+e.getMessage());}
+        }
+    }
+
+    double companyValue(UUID player){
+        synchronized(db){
+            double value=balance(player);
+            Warehouse warehouse=warehouses.get(player);
+            if(warehouse!=null)for(var item:warehouse.items.entrySet())value+=item.getValue()*marketPrice(item.getKey());
+            for(Machine machine:machines.values())if(machine.owner.equals(player)){
+                value+=100_000.0*machine.level;
+                value+=Math.max(0,p.getConfigManager().machines().getDouble("upgrade.levels."+machine.level+".cost",0))*0.5;
+            }
+            Company company=company(player);
+            if(company!=null)value+=Math.max(0,company.assets)+Math.max(0,company.revenue);
+            return Double.isFinite(value)?Math.max(0,value):Double.MAX_VALUE;
+        }
+    }
+
+    String playerName(UUID player){
+        Player online=Bukkit.getPlayer(player);
+        if(online!=null)return online.getName();
+        synchronized(db){
+            try(PreparedStatement query=db.c().prepareStatement("SELECT name FROM players WHERE uuid=?")){
+                query.setString(1,player.toString());
+                try(ResultSet rows=query.executeQuery()){return rows.next()?rows.getString(1):player.toString();}
+            }catch(SQLException e){return player.toString();}
+        }
+    }
+
+    private UUID findPlayerUuid(String name){
+        if(name==null||name.isBlank())return null;
+        Player online=Bukkit.getPlayerExact(name);
+        if(online!=null){ensurePlayer(online);return online.getUniqueId();}
+        synchronized(db){
+            try(PreparedStatement query=db.c().prepareStatement("SELECT uuid FROM players WHERE name=? COLLATE NOCASE ORDER BY last_seen DESC LIMIT 1")){
+                query.setString(1,name);
+                try(ResultSet rows=query.executeQuery()){return rows.next()?UUID.fromString(rows.getString(1)):null;}
+            }catch(SQLException e){p.getLogger().warning("Player lookup failed: "+e.getMessage());return null;}
+        }
+    }
+
+    boolean inviteCompanyMember(UUID actor,String targetName){
+        Company company=company(actor);
+        UUID target=findPlayerUuid(targetName);
+        if(company==null||target==null||actor.equals(target))return false;
+        synchronized(db){
+            try{return new CompanyManager(db.c(),Math.max(1,p.getConfig().getInt("company.max_members",20)))
+                .addMember(company.id(),actor,target,CompanyRole.WORKER,System.currentTimeMillis()/1000);}
+            catch(SQLException|IllegalArgumentException e){p.getLogger().warning("Company invite failed: "+e.getMessage());return false;}
+        }
+    }
+
+    boolean removeCompanyMember(UUID actor,String targetName){
+        Company company=company(actor);
+        UUID target=findPlayerUuid(targetName);
+        if(company==null||target==null)return false;
+        synchronized(db){
+            try{return new CompanyManager(db.c(),Math.max(1,p.getConfig().getInt("company.max_members",20))).removeMember(company.id(),actor,target);}
+            catch(SQLException e){p.getLogger().warning("Company removal failed: "+e.getMessage());return false;}
+        }
+    }
+
+    boolean leaveCompany(UUID player){
+        synchronized(db){
+            try{return new CompanyManager(db.c(),Math.max(1,p.getConfig().getInt("company.max_members",20))).leave(player);}
+            catch(SQLException e){p.getLogger().warning("Company leave failed: "+e.getMessage());return false;}
+        }
+    }
+
+    List<CompanyManager.Member> companyMembers(UUID player){
+        Company company=company(player);
+        if(company==null)return List.of();
+        synchronized(db){
+            try{return new CompanyManager(db.c(),Math.max(1,p.getConfig().getInt("company.max_members",20))).members(company.id());}
+            catch(SQLException e){p.getLogger().warning("Company members lookup failed: "+e.getMessage());return List.of();}
+        }
+    }
+
+    id.kyou.tycoon.company.Employee hireEmployee(UUID player,String type){
+        Company company=company(player);
+        if(company==null||type==null)return null;
+        String key=type.trim().toLowerCase(Locale.ROOT);
+        double salary=p.getConfig().getDouble("employees."+key+".salary",-1);
+        if(!p.getConfig().getBoolean("employees.enabled",true)||salary<0||!Double.isFinite(salary))return null;
+        synchronized(db){
+            try{return new EmployeeManager(db.c()).hire(company.id(),player,key,salary);}
+            catch(SQLException|IllegalArgumentException e){p.getLogger().warning("Employee hire failed: "+e.getMessage());return null;}
+        }
+    }
+
+    List<id.kyou.tycoon.company.Employee> employees(UUID player){
+        Company company=company(player);
+        if(company==null)return List.of();
+        synchronized(db){
+            try{return new EmployeeManager(db.c()).list(company.id());}
+            catch(SQLException e){p.getLogger().warning("Employee list failed: "+e.getMessage());return List.of();}
+        }
+    }
+
+    void payEmployeePayroll(){
+        if(!p.getConfig().getBoolean("employees.enabled",true))return;
+        synchronized(db){
+            List<Long> companies=new ArrayList<>();
+            Map<Long,UUID> owners=new HashMap<>();
+            try(Statement query=db.c().createStatement();ResultSet rows=query.executeQuery(
+                    "SELECT DISTINCT c.id,c.owner_uuid FROM companies c JOIN employees e ON e.company_id=c.id WHERE e.active=1")){
+                while(rows.next()){long id=rows.getLong(1);companies.add(id);owners.put(id,UUID.fromString(rows.getString(2)));}
+            }catch(SQLException e){p.getLogger().warning("Payroll company lookup failed: "+e.getMessage());return;}
+            EmployeeManager manager=new EmployeeManager(db.c());
+            for(long companyId:companies){
+                try{
+                    EmployeeManager.PayrollResult result=manager.payPayroll(companyId,System.currentTimeMillis()/1000);
+                    if(result.paid())refreshPlayerFromDatabase(owners.get(companyId));
+                }catch(SQLException e){p.getLogger().warning("Payroll failed for company "+companyId+": "+e.getMessage());}
+            }
+        }
     }
 
     double marketPrice(Material m){return shop.getOrDefault(m,0d)*marketMult.getOrDefault(m,1d);}
