@@ -8,6 +8,7 @@ import org.bukkit.event.block.*;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.*;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -88,7 +89,14 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
         }
         if(m!=null&&m.owner.equals(e.getPlayer().getUniqueId()))service.removeMachine(b);
     }
-    @EventHandler public void inventory(InventoryClickEvent e){String t=e.getView().getTitle();if(t.contains("KyouTycoon")||t.contains("Machine")||t.contains("Warehouse"))e.setCancelled(true);}
+    @EventHandler public void inventory(InventoryClickEvent e){
+        if(gui.handleClick(e))return;
+        String t=e.getView().getTitle();
+        if(t.contains("KyouTycoon")||t.contains("Machine")||t.contains("Warehouse"))e.setCancelled(true);
+    }
+    @EventHandler public void inventoryDrag(InventoryDragEvent e){
+        if(gui.handleDrag(e))e.setCancelled(true);
+    }
     @EventHandler public void damage(EntityDamageByEntityEvent e){if(!getConfig().getBoolean("world_protection.pvp",false))if(e.getEntity().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world"))&&e.getDamager() instanceof org.bukkit.entity.Player)e.setCancelled(true);}
     @EventHandler public void spawn(CreatureSpawnEvent e){if(!getConfig().getBoolean("world_protection.mob_spawn",false)&&e.getLocation().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world")))e.setCancelled(true);}
     private boolean isProtectedArea(org.bukkit.entity.Player p,World w,int x,int z){return w.getName().equals(getConfig().getString("world.name","tycoon_world"));}

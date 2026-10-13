@@ -16,6 +16,8 @@ final class TycoonService {
     static final class Plot {final int id,minX,maxX,minZ,maxZ;final String world;UUID owner;int level;final long createdAt;Plot(int id,String world,int minX,int maxX,int minZ,int maxZ,UUID owner,int level,long createdAt){this.id=id;this.world=world;this.minX=minX;this.maxX=maxX;this.minZ=minZ;this.maxZ=maxZ;this.owner=owner;this.level=level;this.createdAt=createdAt;}boolean contains(int x,int z){return x>=minX&&x<=maxX&&z>=minZ&&z<=maxZ;}}
     static final class Machine {final UUID id,owner;final String world,type;final int x,y,z;int level;State state;double progress;final long createdAt;long lastProcessed;Machine(UUID id,UUID owner,String world,int x,int y,int z,String type,int level,State state,double progress,long createdAt,long lastProcessed){this.id=id;this.owner=owner;this.world=world;this.x=x;this.y=y;this.z=z;this.type=type;this.level=level;this.state=state;this.progress=progress;this.createdAt=createdAt;this.lastProcessed=lastProcessed;}}
     record MachineDef(String id,Material block,String name,long seconds,int energy,Map<Material,Integer> input,Map<Material,Integer> output,boolean enabled){}
+    enum MachineUpgradeResult { UPGRADED, MAX_LEVEL, NOT_OWNER, INSUFFICIENT_FUNDS, NOT_FOUND }
+
     record Company(long id,String name,UUID owner,double revenue,double assets,int reputation,long createdAt){}
     static final class Warehouse {int capacity;final Map<Material,Integer> items=new ConcurrentHashMap<>();Warehouse(int c){capacity=c;}int total(){return items.values().stream().mapToInt(Integer::intValue).sum();}int amount(Material m){return items.getOrDefault(m,0);}boolean add(Material m,int n){if(n<0||total()+n>capacity)return false;items.merge(m,n,Integer::sum);return true;}boolean remove(Material m,int n){int x=amount(m);if(x<n)return false;if(x==n)items.remove(m);else items.put(m,x-n);return true;}}
     static final class Energy {int stored,capacity;Energy(int c){capacity=c;}boolean consume(int n){if(stored<n)return false;stored-=n;return true;}void add(int n){stored=Math.min(capacity,stored+n);}}
@@ -183,6 +185,22 @@ final class TycoonService {
         pdc.set(new NamespacedKey(p,"machine_uuid"),org.bukkit.persistence.PersistentDataType.STRING,m.id.toString());
         pdc.set(new NamespacedKey(p,"owner_uuid"),org.bukkit.persistence.PersistentDataType.STRING,m.owner.toString());
         state.update(true,false);
+    }
+    MachineUpgradeResult upgradeMachine(UUID owner,UUID machineId){
+        Machine m=machines.get(machineId);
+        if(m==null)return MachineUpgradeResult.NOT_FOUND;
+        if(!m.owner.equals(owner))return MachineUpgradeResult.NOT_OWNER;
+        int max=Math.max(1,p.getConfigManager().machines().getInt("upgrade.max_level",5));
+        int next=m.level+1;
+        if(next>max)return MachineUpgradeResult.MAX_LEVEL;
+        double cost=p.getConfigManager().machines().getDouble("upgrade.levels."+next+".cost",-1);
+        if(!Double.isFinite(cost)||cost<0)return MachineUpgradeResult.MAX_LEVEL;
+        if(!withdraw(owner,cost))return MachineUpgradeResult.INSUFFICIENT_FUNDS;
+        m.level=next;
+        dirtyMachines.add(m.id);
+        savePlayer(owner);
+        saveMachine(m);
+        return MachineUpgradeResult.UPGRADED;
     }
     void removeMachine(Block block){
         Machine m=machine(block);if(m==null)return;
