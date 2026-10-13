@@ -1,6 +1,7 @@
 package id.kyou.tycoon;
 
 import org.bukkit.*;
+import org.bukkit.NamespacedKey;
 import org.bukkit.block.Block;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
@@ -163,7 +164,38 @@ final class TycoonService {
         }
     }
     Material mat(String n,Material f){Material m=Material.matchMaterial(n==null?"":n);return m==null?f:m;}
-    Machine createMachine(Player pl,Block b,String type){MachineDef d=defs.get(type);if(d==null)return null;Machine m=new Machine(UUID.randomUUID(),pl.getUniqueId(),b.getWorld().getName(),b.getX(),b.getY(),b.getZ(),type,1,State.IDLE,0,System.currentTimeMillis()/1000,System.currentTimeMillis()/1000);machines.put(m.id,m);saveMachine(m);return m;}
+    Machine createMachine(Player pl,Block b,String type){
+        MachineDef d=defs.get(type);
+        if(d==null||!d.enabled()||b.getType()!=d.block()||machine(b)!=null)return null;
+        Plot q=at(b.getWorld(),b.getX(),b.getZ());
+        if(q==null||!pl.getUniqueId().equals(q.owner))return null;
+        if(machineCount(pl.getUniqueId())>=p.getConfig().getInt("plot.max_machines_by_level."+q.level,30))return null;
+        Machine m=new Machine(UUID.randomUUID(),pl.getUniqueId(),b.getWorld().getName(),b.getX(),b.getY(),b.getZ(),type,1,State.IDLE,0,System.currentTimeMillis()/1000,System.currentTimeMillis()/1000);
+        machines.put(m.id,m);
+        persistMachineIdentity(b,m);
+        saveMachine(m);
+        return m;
+    }
+    private void persistMachineIdentity(Block block,Machine m){
+        if(!(block.getState() instanceof org.bukkit.block.TileState state))return;
+        var pdc=state.getPersistentDataContainer();
+        pdc.set(new NamespacedKey(p,"machine_id"),org.bukkit.persistence.PersistentDataType.STRING,m.type);
+        pdc.set(new NamespacedKey(p,"machine_uuid"),org.bukkit.persistence.PersistentDataType.STRING,m.id.toString());
+        pdc.set(new NamespacedKey(p,"owner_uuid"),org.bukkit.persistence.PersistentDataType.STRING,m.owner.toString());
+        state.update(true,false);
+    }
+    void removeMachine(Block block){
+        Machine m=machine(block);if(m==null)return;
+        machines.remove(m.id);
+        if(block.getState() instanceof org.bukkit.block.TileState state){
+            var pdc=state.getPersistentDataContainer();
+            pdc.remove(new NamespacedKey(p,"machine_id"));
+            pdc.remove(new NamespacedKey(p,"machine_uuid"));
+            pdc.remove(new NamespacedKey(p,"owner_uuid"));
+            state.update(true,false);
+        }
+        db.executor().execute(()->{synchronized(db){try(PreparedStatement q=db.c().prepareStatement("DELETE FROM machines WHERE uuid=?")){q.setString(1,m.id.toString());q.executeUpdate();}catch(Exception e){p.getLogger().warning("Machine delete: "+e.getMessage());}}});
+    }
     Machine machine(Block b){for(Machine m:machines.values())if(m.world.equals(b.getWorld().getName())&&m.x==b.getX()&&m.y==b.getY()&&m.z==b.getZ())return m;return null;}
     int machineCount(UUID u){return (int)machines.values().stream().filter(m->m.owner.equals(u)).count();}
     Warehouse warehouse(UUID u){return warehouses.computeIfAbsent(u,k->{
