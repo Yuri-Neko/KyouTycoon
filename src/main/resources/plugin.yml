@@ -1,0 +1,25 @@
+name: KyouTycoon
+version: '${version}'
+main: id.kyou.tycoon.KyouTycoon
+api-version: '1.21'
+author: Kyou
+description: Standalone vanilla Minecraft Tycoon with SQLite persistence.
+commands:
+  tycoon: {description: Main KyouTycoon command, permission: kyoutycoon.player}
+  plot: {description: Plot commands, permission: kyoutycoon.plot}
+  balance: {description: Balance, permission: kyoutycoon.player}
+  pay: {description: Pay player, permission: kyoutycoon.player}
+  baltop: {description: Balance leaderboard, permission: kyoutycoon.player}
+  company: {description: Company commands, permission: kyoutycoon.company}
+  market: {description: Market, permission: kyoutycoon.player}
+  contract: {description: Contracts, permission: kyoutycoon.player}
+  research: {description: Research, permission: kyoutycoon.player}
+  prestige: {description: Prestige, permission: kyoutycoon.player}
+  tyadmin: {description: Admin commands, permission: kyoutycoon.admin}
+permissions:
+  kyoutycoon.player: {default: true}
+  kyoutycoon.plot: {default: true}
+  kyoutycoon.company: {default: true}
+  kyoutycoon.admin: {default: op}
+  kyoutycoon.admin.reload: {default: op}
+  kyoutycoon.admin.debug: {default: op}
