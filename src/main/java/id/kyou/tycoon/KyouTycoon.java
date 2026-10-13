@@ -2,6 +2,7 @@ package id.kyou.tycoon;
 
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.entity.Player;
 import org.bukkit.event.*;
 import org.bukkit.event.block.*;
 import org.bukkit.event.entity.CreatureSpawnEvent;
@@ -26,6 +27,7 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     }
     @Override public void onDisable(){if(service!=null)service.saveAll();if(database!=null)database.close();}
     void reloadPlugin(){config.reload();service.loadConfigData();}
+    ConfigManager getConfigManager(){return config;}
     String msg(String key){return msg(key,Map.of());}
     String msg(String key,Map<String,?> vals){String s=config.messages().getString(key,"&cMissing message: "+key);java.util.HashMap<String,Object> m=new java.util.HashMap<>(vals);m.put("prefix",config.messages().getString("prefix","&8[&aKyouTycoon&8] "));for(var e:m.entrySet())s=s.replace("{"+e.getKey()+"}",String.valueOf(e.getValue()));return ChatColor.translateAlternateColorCodes('&',s);}
     ConfigManager config(){return config;} TycoonService service(){return service;} TycoonWorld world(){return world;} GUI gui(){return gui;}
@@ -38,7 +40,7 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     }
     @EventHandler public void place(BlockPlaceEvent e){
         Player p=e.getPlayer();Block b=e.getBlock();TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());
-        if(q!=null&&q.owner!=null&&q.owner.equals(p.getUniqueId())){TycoonService.MachineDef d=service.defs.values().stream().filter(x->x.block()==b.getType()).findFirst().orElse(null);if(d!=null&&d.enabled&&service.machineCount(p.getUniqueId())<getConfig().getInt("plot.max_machines_by_level."+q.level,30))service.createMachine(p,b,d.id);}
+        if(q!=null&&q.owner!=null&&q.owner.equals(p.getUniqueId())){TycoonService.MachineDef d=service.defs.values().stream().filter(x->x.block()==b.getType()).findFirst().orElse(null);if(d!=null&&d.enabled()&&service.machineCount(p.getUniqueId())<getConfig().getInt("plot.max_machines_by_level."+q.level,30))service.createMachine(p,b,d.id());}
         if(isProtectedArea(p,b.getWorld(),b.getX(),b.getZ())&&q!=null&&q.owner!=null&&!q.owner.equals(p.getUniqueId()))e.setCancelled(true);
     }
     @EventHandler public void breakBlock(BlockBreakEvent e){Block b=e.getBlock();TycoonService.Machine m=service.machine(b);if(m!=null&&!m.owner.equals(e.getPlayer().getUniqueId())){e.setCancelled(true);return;}if(isProtectedArea(e.getPlayer(),b.getWorld(),b.getX(),b.getZ())){TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());if(q!=null&&q.owner!=null&&!q.owner.equals(e.getPlayer().getUniqueId()))e.setCancelled(true);}}
