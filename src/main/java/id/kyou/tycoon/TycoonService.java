@@ -107,8 +107,36 @@ final class TycoonService {
         }
         return x;
     }
-    void savePlayer(UUID u){PlayerData d=players.get(u);if(d==null)return;db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO players(uuid,name,balance,revenue,expense,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,balance=excluded.balance,revenue=excluded.revenue,expense=excluded.expense,last_seen=excluded.last_seen")){q.setString(1,u.toString());q.setString(2,d.name());q.setDouble(3,d.balance());q.setDouble(4,d.revenue());q.setDouble(5,d.expense());q.setLong(6,System.currentTimeMillis()/1000);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Player save: "+e.getMessage());}});}
-    void saveMachine(Machine m){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO machines(uuid,owner_uuid,world,x,y,z,machine_type,level,state,progress,created_at,last_processed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET state=excluded.state,progress=excluded.progress,last_processed=excluded.last_processed,level=excluded.level")){q.setString(1,m.id.toString());q.setString(2,m.owner.toString());q.setString(3,m.world);q.setInt(4,m.x);q.setInt(5,m.y);q.setInt(6,m.z);q.setString(7,m.type);q.setInt(8,m.level);q.setString(9,m.state.name());q.setDouble(10,m.progress);q.setLong(11,m.createdAt);q.setLong(12,m.lastProcessed);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Machine save: "+e.getMessage());}});}
+    void savePlayer(UUID uuid){
+        PlayerData data=players.get(uuid);
+        if(data==null)return;
+        db.executor().execute(()->{
+            synchronized(db){
+                try(PreparedStatement q=db.c().prepareStatement(
+                        "INSERT INTO players(uuid,name,balance,revenue,expense,last_seen) VALUES(?,?,?,?,?,?) "
+                        +"ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,balance=excluded.balance,revenue=excluded.revenue,expense=excluded.expense,last_seen=excluded.last_seen")){
+                    q.setString(1,uuid.toString());q.setString(2,data.name());q.setDouble(3,data.balance());
+                    q.setDouble(4,data.revenue());q.setDouble(5,data.expense());q.setLong(6,System.currentTimeMillis()/1000);
+                    q.executeUpdate();
+                }catch(Exception e){p.getLogger().warning("Player save: "+e.getMessage());}
+            }
+        });
+    }
+    void saveMachine(Machine machine){
+        db.executor().execute(()->{
+            synchronized(db){
+                try(PreparedStatement q=db.c().prepareStatement(
+                        "INSERT INTO machines(uuid,owner_uuid,world,x,y,z,machine_type,level,state,progress,created_at,last_processed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+                        +"ON CONFLICT(uuid) DO UPDATE SET owner_uuid=excluded.owner_uuid,world=excluded.world,x=excluded.x,y=excluded.y,z=excluded.z,"
+                        +"machine_type=excluded.machine_type,level=excluded.level,state=excluded.state,progress=excluded.progress,last_processed=excluded.last_processed")){
+                    q.setString(1,machine.id.toString());q.setString(2,machine.owner.toString());q.setString(3,machine.world);
+                    q.setInt(4,machine.x);q.setInt(5,machine.y);q.setInt(6,machine.z);q.setString(7,machine.type);
+                    q.setInt(8,machine.level);q.setString(9,machine.state.name());q.setDouble(10,machine.progress);
+                    q.setLong(11,machine.createdAt);q.setLong(12,machine.lastProcessed);q.executeUpdate();
+                }catch(Exception e){p.getLogger().warning("Machine save: "+e.getMessage());}
+            }
+        });
+    }
     void saveAll(){
         List<PlayerData> playerSnapshot=new ArrayList<>(players.values());
         List<Machine> machineSnapshot=machines.values().stream().map(m->new Machine(m.id,m.owner,m.world,m.x,m.y,m.z,m.type,m.level,m.state,m.progress,m.createdAt,m.lastProcessed)).toList();
@@ -165,7 +193,16 @@ final class TycoonService {
     void deposit(UUID u,double a){PlayerData d=players.get(u);if(d!=null){players.put(u,new PlayerData(u,d.name(),d.balance()+a,d.revenue()+a,d.expense(),d.lastSeen()));checkMoneyAchievements(u);}}
     Plot plot(UUID u){return plots.values().stream().filter(x->u.equals(x.owner)).findFirst().orElse(null);} Plot at(World w,int x,int z){return plots.values().stream().filter(q->q.world.equals(w.getName())&&q.contains(x,z)).findFirst().orElse(null);}
     Plot claim(UUID u){if(plot(u)!=null)return null;Plot x=plots.values().stream().filter(q->q.owner==null).min(Comparator.comparingInt(q->q.id)).orElse(null);if(x==null)return null;x.owner=u;savePlot(x);unlockAchievement(u,"first_plot");return x;}
-    void savePlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("UPDATE plots SET owner_uuid=?,level=? WHERE id=?")){q.setString(1,x.owner==null?null:x.owner.toString());q.setInt(2,x.level);q.setInt(3,x.id);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot save: "+e.getMessage());}});}
+    void savePlot(Plot plot){
+        db.executor().execute(()->{
+            synchronized(db){
+                try(PreparedStatement q=db.c().prepareStatement("UPDATE plots SET owner_uuid=?,level=? WHERE id=?")){
+                    q.setString(1,plot.owner==null?null:plot.owner.toString());q.setInt(2,plot.level);q.setInt(3,plot.id);
+                    q.executeUpdate();
+                }catch(Exception e){p.getLogger().warning("Plot save: "+e.getMessage());}
+            }
+        });
+    }
     void generatePlots(World w,boolean generateTerrain){
         int px=p.getConfig().getInt("world.plots_x",10),pz=p.getConfig().getInt("world.plots_z",10);
         int size=p.getConfig().getInt("world.plot_size",100),road=Math.max(1,p.getConfig().getInt("world.road_size",7));
@@ -193,7 +230,18 @@ final class TycoonService {
         }
         if(generateTerrain&&p.getConfig().getBoolean("world.road.enabled",true))generateRoads(w,effective,road);
     }
-    void insertPlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT OR IGNORE INTO plots(id,world,min_x,max_x,min_z,max_z,owner_uuid,level,created_at) VALUES(?,?,?,?,?,?,?,?,?)")){q.setInt(1,x.id);q.setString(2,x.world);q.setInt(3,x.minX);q.setInt(4,x.maxX);q.setInt(5,x.minZ);q.setInt(6,x.maxZ);q.setString(7,null);q.setInt(8,x.level);q.setLong(9,x.createdAt);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot insert: "+e.getMessage());}});}
+    void insertPlot(Plot plot){
+        db.executor().execute(()->{
+            synchronized(db){
+                try(PreparedStatement q=db.c().prepareStatement(
+                        "INSERT OR IGNORE INTO plots(id,world,min_x,max_x,min_z,max_z,owner_uuid,level,created_at) VALUES(?,?,?,?,?,?,?,?,?)")){
+                    q.setInt(1,plot.id);q.setString(2,plot.world);q.setInt(3,plot.minX);q.setInt(4,plot.maxX);
+                    q.setInt(5,plot.minZ);q.setInt(6,plot.maxZ);q.setString(7,null);
+                    q.setInt(8,plot.level);q.setLong(9,plot.createdAt);q.executeUpdate();
+                }catch(Exception e){p.getLogger().warning("Plot insert: "+e.getMessage());}
+            }
+        });
+    }
     private void generateRoads(World w,List<PlotLayout.Bounds> layout,int road){
         Material border=mat(p.getConfig().getString("world.road.border_material"),Material.STONE);
         Material roadMaterial=mat(p.getConfig().getString("world.road.material"),Material.STONE_BRICKS);
