@@ -38,5 +38,21 @@ jobs:
                   yaml.safe_load(f)
               print(f"YAML OK: {file}")
           PY
+      - name: Report JUnit failures
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path("build/test-results/test").glob("TEST-*.xml"))
+          for report in reports:
+              root = ET.parse(report).getroot()
+              for case in root.iter("testcase"):
+                  problem = case.find("failure") or case.find("error")
+                  if problem is not None:
+                      print(f"FAIL: {case.get('classname')}::{case.get('name')}")
+                      print(problem.get("message", ""))
+                      print((problem.text or "")[-5000:])
+          PY
       - name: Compile, test and build plugin
         run: gradle --no-daemon clean test build
