@@ -49,23 +49,21 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
         }
     }
     @EventHandler public void quit(PlayerQuitEvent e){service.markOffline(e.getPlayer().getUniqueId());service.savePlayer(e.getPlayer().getUniqueId());}
-    @EventHandler public void interact(PlayerInteractEvent e){
-        Block b=e.getClickedBlock();
-        if(b==null||!isProtectedArea(e.getPlayer(),b.getWorld(),b.getX(),b.getZ()))return;
-        TycoonService.Plot q=service.at(b.getWorld(),b.getX(),b.getZ());
-        TycoonService.Machine m=service.machine(b);
-        if(m!=null){
-            e.setCancelled(true);
-            if(!m.owner.equals(e.getPlayer().getUniqueId())){e.getPlayer().sendMessage(msg("not_your_plot"));return;}
-            gui.machine(e.getPlayer(),m);
+    @EventHandler public void interact(PlayerInteractEvent event){
+        Block block=event.getClickedBlock();
+        if(block==null||!isProtectedArea(event.getPlayer(),block.getWorld(),block.getX(),block.getZ()))return;
+        TycoonService.Plot plot=service.at(block.getWorld(),block.getX(),block.getZ());
+        TycoonService.Machine machine=service.machine(block);
+        if(machine!=null){
+            event.setCancelled(true);
+            if(!machine.owner.equals(event.getPlayer().getUniqueId())){event.getPlayer().sendMessage(msg("not_your_plot"));return;}
+            gui.machine(event.getPlayer(),machine);
             return;
         }
-        if(getConfig().getBoolean("world_protection.interact",true)){
-            boolean owns=q!=null&&e.getPlayer().getUniqueId().equals(q.owner);
-            boolean container=b.getState() instanceof org.bukkit.block.Container;
-            if(container&&!owns)e.setCancelled(true);
-            if(q!=null&&(q.owner==null||!e.getPlayer().getUniqueId().equals(q.owner)))e.setCancelled(true);
-        }
+        boolean ownsPlot=plot!=null&&event.getPlayer().getUniqueId().equals(plot.owner);
+        if(getConfig().getBoolean("world_protection.interact",true)&&!ownsPlot)event.setCancelled(true);
+        if(getConfig().getBoolean("world_protection.container",true)
+                &&block.getState() instanceof org.bukkit.block.Container&&!ownsPlot)event.setCancelled(true);
     }
     @EventHandler public void place(BlockPlaceEvent e){
         if(!isProtectedArea(e.getPlayer(),e.getBlock().getWorld(),e.getBlock().getX(),e.getBlock().getZ()))return;
@@ -99,7 +97,21 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     @EventHandler public void inventoryDrag(InventoryDragEvent e){
         if(gui.handleDrag(e))e.setCancelled(true);
     }
-    @EventHandler public void damage(EntityDamageByEntityEvent e){if(!getConfig().getBoolean("world_protection.pvp",false))if(e.getEntity().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world"))&&e.getDamager() instanceof org.bukkit.entity.Player)e.setCancelled(true);}
+    @EventHandler public void damage(org.bukkit.event.entity.EntityDamageEvent event){
+        World world=event.getEntity().getWorld();
+        if(!world.getName().equals(getConfig().getString("world.name","tycoon_world")))return;
+        if(!getConfig().getBoolean("world_protection.damage",true)){event.setCancelled(true);return;}
+        if(event instanceof EntityDamageByEntityEvent byEntity
+                &&event.getEntity() instanceof Player
+                &&!getConfig().getBoolean("world_protection.pvp",false)
+                &&isPlayerAttack(byEntity.getDamager()))event.setCancelled(true);
+    }
+    private boolean isPlayerAttack(org.bukkit.entity.Entity damager){
+        if(damager instanceof Player)return true;
+        if(damager instanceof org.bukkit.entity.projectile.Projectile projectile)
+            return projectile.getShooter() instanceof Player;
+        return false;
+    }
     @EventHandler public void spawn(CreatureSpawnEvent e){if(!getConfig().getBoolean("world_protection.mob_spawn",false)&&e.getLocation().getWorld().getName().equals(getConfig().getString("world.name","tycoon_world")))e.setCancelled(true);}
     private boolean isProtectedArea(org.bukkit.entity.Player p,World w,int x,int z){return w.getName().equals(getConfig().getString("world.name","tycoon_world"));}
 }
