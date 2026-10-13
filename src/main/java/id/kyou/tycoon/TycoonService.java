@@ -7,6 +7,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import id.kyou.tycoon.economy.ContractManager;
+import id.kyou.tycoon.world.RoadLayout;
 import id.kyou.tycoon.progression.AchievementManager;
 import id.kyou.tycoon.progression.PrestigeManager;
 import id.kyou.tycoon.progression.ResearchManager;
@@ -165,63 +166,45 @@ final class TycoonService {
     Plot plot(UUID u){return plots.values().stream().filter(x->u.equals(x.owner)).findFirst().orElse(null);} Plot at(World w,int x,int z){return plots.values().stream().filter(q->q.world.equals(w.getName())&&q.contains(x,z)).findFirst().orElse(null);}
     Plot claim(UUID u){if(plot(u)!=null)return null;Plot x=plots.values().stream().filter(q->q.owner==null).min(Comparator.comparingInt(q->q.id)).orElse(null);if(x==null)return null;x.owner=u;savePlot(x);unlockAchievement(u,"first_plot");return x;}
     void savePlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("UPDATE plots SET owner_uuid=?,level=? WHERE id=?")){q.setString(1,x.owner==null?null:x.owner.toString());q.setInt(2,x.level);q.setInt(3,x.id);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot save: "+e.getMessage());}});}
-    void generatePlots(World w){
+    void generatePlots(World w,boolean generateTerrain){
         int px=p.getConfig().getInt("world.plots_x",10),pz=p.getConfig().getInt("world.plots_z",10);
-        int size=p.getConfig().getInt("world.plot_size",100),road=p.getConfig().getInt("world.road_size",7);
-        List<PlotLayout.Bounds> layout=PlotLayout.create(px,pz,size,road);
+        int size=p.getConfig().getInt("world.plot_size",100),road=Math.max(1,p.getConfig().getInt("world.road_size",7));
+        List<PlotLayout.Bounds> configured=PlotLayout.create(px,pz,size,road);
+        List<PlotLayout.Bounds> effective=new ArrayList<>(configured.size());
         long now=System.currentTimeMillis()/1000;
         Material ground=mat(p.getConfig().getString("world.ground.material"),Material.GRASS_BLOCK);
-        for(PlotLayout.Bounds b:layout){
-            Plot q=plots.get(b.id());
-            if(q==null){
-                q=new Plot(b.id(),w.getName(),b.minX(),b.maxX(),b.minZ(),b.maxZ(),null,
+        for(PlotLayout.Bounds bounds:configured){
+            Plot plot=plots.get(bounds.id());
+            if(plot==null){
+                plot=new Plot(bounds.id(),w.getName(),bounds.minX(),bounds.maxX(),bounds.minZ(),bounds.maxZ(),null,
                     p.getConfig().getInt("plot.starting_level",1),now);
-                plots.put(q.id,q);
-                insertPlot(q);
+                plots.put(plot.id,plot);
+                insertPlot(plot);
+            }else if(!plot.world.equals(w.getName())){
+                p.getLogger().warning("Plot #"+plot.id+" remains assigned to world '"+plot.world
+                    +"'; configured world is '"+w.getName()+"'. Existing ownership and coordinates were preserved.");
             }
-            for(int x=b.minX();x<=b.maxX();x++){
-                for(int z=b.minZ();z<=b.maxZ();z++){
-                    w.getBlockAt(x,63,z).setType(ground,false);
+            effective.add(new PlotLayout.Bounds(plot.id,plot.minX,plot.maxX,plot.minZ,plot.maxZ));
+            if(generateTerrain){
+                for(int x=plot.minX;x<=plot.maxX;x++){
+                    for(int z=plot.minZ;z<=plot.maxZ;z++)w.getBlockAt(x,63,z).setType(ground,false);
                 }
             }
         }
-        generateRoads(w,layout,road);
+        if(generateTerrain&&p.getConfig().getBoolean("world.road.enabled",true))generateRoads(w,effective,road);
     }
     void insertPlot(Plot x){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT OR IGNORE INTO plots(id,world,min_x,max_x,min_z,max_z,owner_uuid,level,created_at) VALUES(?,?,?,?,?,?,?,?,?)")){q.setInt(1,x.id);q.setString(2,x.world);q.setInt(3,x.minX);q.setInt(4,x.maxX);q.setInt(5,x.minZ);q.setInt(6,x.maxZ);q.setString(7,null);q.setInt(8,x.level);q.setLong(9,x.createdAt);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Plot insert: "+e.getMessage());}});}
     private void generateRoads(World w,List<PlotLayout.Bounds> layout,int road){
-        if(layout.isEmpty())return;
-        int minX=layout.stream().mapToInt(PlotLayout.Bounds::minX).min().orElse(0);
-        int maxX=layout.stream().mapToInt(PlotLayout.Bounds::maxX).max().orElse(0);
-        int minZ=layout.stream().mapToInt(PlotLayout.Bounds::minZ).min().orElse(0);
-        int maxZ=layout.stream().mapToInt(PlotLayout.Bounds::maxZ).max().orElse(0);
         Material border=mat(p.getConfig().getString("world.road.border_material"),Material.STONE);
-        Material roadMat=mat(p.getConfig().getString("world.road.material"),Material.STONE_BRICKS);
+        Material roadMaterial=mat(p.getConfig().getString("world.road.material"),Material.STONE_BRICKS);
         Material center=mat(p.getConfig().getString("world.road.center_material"),Material.WHITE_CONCRETE);
-        // Horizontal roads: exactly the configured number of blocks between plot rows.
-        Set<Integer> roadRows=new HashSet<>();
-        for(PlotLayout.Bounds b:layout){
-            if(b.maxZ()>=maxZ||!roadRows.add(b.maxZ()))continue;
-            int start=b.maxZ()+1;
-            for(int z=start;z<start+road;z++){
-                for(int x=minX;x<=maxX;x++){
-                    int lane=z-start;
-                    Material m=(lane==0||lane==road-1)?border:(lane==road/2?center:roadMat);
-                    w.getBlockAt(x,63,z).setType(m,false);
-                }
-            }
-        }
-        // Vertical roads: exactly the configured number of blocks between plot columns.
-        Set<Integer> roadColumns=new HashSet<>();
-        for(PlotLayout.Bounds b:layout){
-            if(b.maxX()>=maxX||!roadColumns.add(b.maxX()))continue;
-            int start=b.maxX()+1;
-            for(int x=start;x<start+road;x++){
-                for(int z=minZ;z<=maxZ;z++){
-                    int lane=x-start;
-                    Material m=(lane==0||lane==road-1)?border:(lane==road/2?center:roadMat);
-                    w.getBlockAt(x,63,z).setType(m,false);
-                }
-            }
+        for(RoadLayout.Cell cell:RoadLayout.create(layout,road)){
+            Material material=switch(cell.surface()){
+                case BORDER->border;
+                case ROAD->roadMaterial;
+                case CENTER->center;
+            };
+            w.getBlockAt(cell.x(),63,cell.z()).setType(material,false);
         }
     }
     Material mat(String n,Material f){Material m=Material.matchMaterial(n==null?"":n);return m==null?f:m;}
