@@ -32,7 +32,18 @@ final class TycoonService {
     private void loadPlots(){try(Statement s=db.c().createStatement();ResultSet r=s.executeQuery("SELECT * FROM plots ORDER BY id")){while(r.next()){String o=r.getString("owner_uuid");Plot x=new Plot(r.getInt("id"),r.getString("world"),r.getInt("min_x"),r.getInt("max_x"),r.getInt("min_z"),r.getInt("max_z"),o==null?null:UUID.fromString(o),r.getInt("level"),r.getLong("created_at"));plots.put(x.id,x);}}catch(Exception e){p.getLogger().warning("Plot load: "+e.getMessage());}}
     private void loadMachines(){try(Statement s=db.c().createStatement();ResultSet r=s.executeQuery("SELECT * FROM machines")){while(r.next()){Machine m=new Machine(UUID.fromString(r.getString("uuid")),UUID.fromString(r.getString("owner_uuid")),r.getString("world"),r.getInt("x"),r.getInt("y"),r.getInt("z"),r.getString("machine_type"),r.getInt("level"),State.valueOf(r.getString("state")),r.getDouble("progress"),r.getLong("created_at"),r.getLong("last_processed"));machines.put(m.id,m);}}catch(Exception e){p.getLogger().warning("Machine load: "+e.getMessage());}}
     void loadConfigData(){defs.clear();ConfigurationSection s=p.getConfigManager().machines().getConfigurationSection("machines");if(s!=null)for(String id:s.getKeys(false)){String b="machines."+id;Material mat=Material.matchMaterial(p.getConfigManager().machines().getString(b+".block","STONE"));if(mat==null)continue;defs.put(id,new MachineDef(id,mat,p.getConfigManager().machines().getString(b+".display_name",id),Math.max(1,p.getConfigManager().machines().getLong(b+".production_time",10)),Math.max(0,p.getConfigManager().machines().getInt(b+".energy_usage",0)),items(p.getConfigManager().machines().getConfigurationSection(b+".input")),items(p.getConfigManager().machines().getConfigurationSection(b+".output")),p.getConfigManager().machines().getBoolean(b+".enabled",true)));}shop.clear();ConfigurationSection sh=p.getConfigManager().shops().getConfigurationSection("sell");if(sh!=null)for(String k:sh.getKeys(false)){Material m=Material.matchMaterial(k);if(m!=null)shop.put(m,p.getConfigManager().shops().getDouble(k+".price"));}for(Material m:shop.keySet())marketMult.putIfAbsent(m,1d);}
-    private Map<Material,Integer> items(ConfigurationSection s){Map<Material,Integer> x=new HashMap<>();if(s==null)return x;for(String k:s.getKeys(false)){Material m=Material.matchMaterial(k);if(m!=null)x.put(m,Math.max(1,s.getInt(k)));}return x;}
+    private Map<Material,Integer> items(ConfigurationSection s){
+        Map<Material,Integer> x=new HashMap<>();
+        if(s==null)return x;
+        for(String k:s.getKeys(false)){
+            Material m=Material.matchMaterial(k);
+            if(m==null)continue;
+            Object value=s.get(k);
+            int amount=value instanceof ConfigurationSection nested?nested.getInt("amount",1):s.getInt(k,1);
+            if(amount>0)x.put(m,amount);
+        }
+        return x;
+    }
     void savePlayer(UUID u){PlayerData d=players.get(u);if(d==null)return;db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO players(uuid,name,balance,revenue,expense,last_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET name=excluded.name,balance=excluded.balance,revenue=excluded.revenue,expense=excluded.expense,last_seen=excluded.last_seen")){q.setString(1,u.toString());q.setString(2,d.name());q.setDouble(3,d.balance());q.setDouble(4,d.revenue());q.setDouble(5,d.expense());q.setLong(6,System.currentTimeMillis()/1000);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Player save: "+e.getMessage());}});}
     void saveMachine(Machine m){db.executor().execute(()->{try(PreparedStatement q=db.c().prepareStatement("INSERT INTO machines(uuid,owner_uuid,world,x,y,z,machine_type,level,state,progress,created_at,last_processed) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(uuid) DO UPDATE SET state=excluded.state,progress=excluded.progress,last_processed=excluded.last_processed,level=excluded.level")){q.setString(1,m.id.toString());q.setString(2,m.owner.toString());q.setString(3,m.world);q.setInt(4,m.x);q.setInt(5,m.y);q.setInt(6,m.z);q.setString(7,m.type);q.setInt(8,m.level);q.setString(9,m.state.name());q.setDouble(10,m.progress);q.setLong(11,m.createdAt);q.setLong(12,m.lastProcessed);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Machine save: "+e.getMessage());}});}
     void saveAll(){
@@ -224,6 +235,64 @@ final class TycoonService {
         for(var e:d.output.entrySet())w.add(e.getKey(),(int)Math.ceil(e.getValue()*om));
         dirtyWarehouses.add(m.owner);
         return true;}
+    int warehouseAmount(UUID owner,Material type){return warehouse(owner).amount(type);}
+    int warehouseCapacity(UUID owner){return warehouse(owner).capacity;}
+    int warehouseUsed(UUID owner){return warehouse(owner).total();}
+    Map<Material,Integer> warehouseItems(UUID owner){return Map.copyOf(warehouse(owner).items);}
+    boolean depositInventory(Player player,Material type,int amount){
+        if(type==null||amount<=0)return false;
+        Warehouse w=warehouse(player.getUniqueId());
+        int available=Arrays.stream(player.getInventory().getStorageContents()).filter(Objects::nonNull).filter(i->i.getType()==type).mapToInt(ItemStack::getAmount).sum();
+        if(available<amount||w.total()+amount>w.capacity)return false;
+        int left=amount;
+        ItemStack[] slots=player.getInventory().getStorageContents();
+        for(int i=0;i<slots.length&&left>0;i++){
+            ItemStack item=slots[i];
+            if(item==null||item.getType()!=type)continue;
+            int take=Math.min(left,item.getAmount());
+            if(take==item.getAmount())slots[i]=null;else item.setAmount(item.getAmount()-take);
+            left-=take;
+        }
+        player.getInventory().setStorageContents(slots);
+        w.add(type,amount);dirtyWarehouses.add(player.getUniqueId());
+        return true;
+    }
+    boolean withdrawToInventory(Player player,Material type,int amount){
+        if(type==null||amount<=0)return false;
+        Warehouse w=warehouse(player.getUniqueId());
+        if(w.amount(type)<amount)return false;
+        ItemStack template=new ItemStack(type);
+        int space=0;
+        for(ItemStack item:player.getInventory().getStorageContents()){
+            if(item==null)space+=template.getMaxStackSize();
+            else if(item.isSimilar(template))space+=Math.max(0,item.getMaxStackSize()-item.getAmount());
+        }
+        if(space<amount)return false;
+        if(!w.remove(type,amount))return false;
+        Map<Integer,ItemStack> leftover=player.getInventory().addItem(new ItemStack(type,amount));
+        if(!leftover.isEmpty()){
+            for(ItemStack item:leftover.values())w.add(type,item.getAmount());
+            dirtyWarehouses.add(player.getUniqueId());
+            return false;
+        }
+        dirtyWarehouses.add(player.getUniqueId());
+        return true;
+    }
+    boolean sellFromWarehouse(UUID owner,Material type,int amount){
+        if(type==null||amount<=0||!shop.containsKey(type))return false;
+        Warehouse w=warehouse(owner);
+        if(!w.remove(type,amount))return false;
+        double total=marketPrice(type)*amount;
+        deposit(owner,total);dirtyWarehouses.add(owner);recordTransaction(owner,"SELL",total,amount+" "+type.name());
+        double current=marketMult.getOrDefault(type,1d);
+        double min=p.getConfig().getDouble("market.minimum_price_multiplier",0.5);
+        marketMult.put(type,Math.max(min,current*Math.max(0.80,1.0-amount/10000.0)));
+        return true;
+    }
+    private void recordTransaction(UUID owner,String type,double amount,String note){
+        db.executor().execute(()->{synchronized(db){try(PreparedStatement q=db.c().prepareStatement("INSERT INTO transactions(player_uuid,type,amount,note,created_at) VALUES(?,?,?,?,?)")){q.setString(1,owner.toString());q.setString(2,type);q.setDouble(3,amount);q.setString(4,note);q.setLong(5,System.currentTimeMillis()/1000);q.executeUpdate();}catch(Exception e){p.getLogger().warning("Transaction save: "+e.getMessage());}}});
+    }
+
     double marketPrice(Material m){return shop.getOrDefault(m,0d)*marketMult.getOrDefault(m,1d);}
     void marketTick(){if(!p.getConfig().getBoolean("market.dynamic_price",true))return;double min=p.getConfig().getDouble("market.minimum_price_multiplier",.5),max=p.getConfig().getDouble("market.maximum_price_multiplier",2);for(Material m:marketMult.keySet())marketMult.put(m,Math.max(min,Math.min(max,marketMult.get(m)+(Math.random()-.5)*.05)));}
     Company company(UUID u){try(PreparedStatement q=db.c().prepareStatement("SELECT c.* FROM companies c JOIN company_members m ON c.id=m.company_id WHERE m.player_uuid=?")){q.setString(1,u.toString());try(ResultSet r=q.executeQuery()){if(!r.next())return null;return new Company(r.getLong("id"),r.getString("name"),UUID.fromString(r.getString("owner_uuid")),r.getDouble("revenue"),r.getDouble("assets"),r.getInt("reputation"),r.getLong("created_at"));}}catch(Exception e){return null;}}
