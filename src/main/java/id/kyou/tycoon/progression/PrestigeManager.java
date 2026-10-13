@@ -1,97 +1,106 @@
 package id.kyou.tycoon.progression;
 
+import org.bukkit.configuration.ConfigurationSection;
+
 import java.sql.*;
 import java.util.Objects;
 import java.util.UUID;
 
-/** Atomic prestige reset policy. Kept achievements and prestige level are never deleted. */
+/** Transaction-safe prestige progress and configured reset behaviour. */
 public final class PrestigeManager {
     private final Connection connection;
-    private final double startingBalance;
-    private final double minimumCompanyValue;
-    private final ResetPolicy resetPolicy;
+    private final ConfigurationSection config;
 
-    public PrestigeManager(Connection connection, double startingBalance, double minimumCompanyValue, ResetPolicy resetPolicy) {
+    public PrestigeManager(Connection connection, ConfigurationSection config) {
         this.connection = Objects.requireNonNull(connection, "connection");
-        if (!Double.isFinite(startingBalance) || startingBalance < 0) throw new IllegalArgumentException("Invalid starting balance");
-        if (!Double.isFinite(minimumCompanyValue) || minimumCompanyValue < 0) throw new IllegalArgumentException("Invalid prestige threshold");
-        this.startingBalance = startingBalance;
-        this.minimumCompanyValue = minimumCompanyValue;
-        this.resetPolicy = Objects.requireNonNull(resetPolicy, "resetPolicy");
+        this.config = Objects.requireNonNull(config, "config");
     }
 
-    public Result prestige(UUID player, double companyValue) throws SQLException {
-        Objects.requireNonNull(player, "player");
-        if (!Double.isFinite(companyValue) || companyValue < minimumCompanyValue) return new Result(false, 0, "threshold-not-met");
-        boolean oldAuto = connection.getAutoCommit();
-        connection.setAutoCommit(false);
-        try {
-            double currentBalance;
-            try (PreparedStatement q = connection.prepareStatement("SELECT balance FROM players WHERE uuid=?")) {
-                q.setString(1, player.toString());
-                try (ResultSet rows = q.executeQuery()) {
-                    if (!rows.next()) { connection.rollback(); return new Result(false, 0, "player-not-found"); }
-                    currentBalance = rows.getDouble(1);
-                }
-            }
-            int previous;
-            try (PreparedStatement q = connection.prepareStatement("SELECT level FROM prestige WHERE player_uuid=?")) {
-                q.setString(1, player.toString());
-                try (ResultSet rows = q.executeQuery()) { previous = rows.next() ? rows.getInt(1) : 0; }
-            }
-            int level = Math.addExact(previous, 1);
-            try (PreparedStatement q = connection.prepareStatement(
-                    "INSERT INTO prestige(player_uuid,level) VALUES(?,?) ON CONFLICT(player_uuid) DO UPDATE SET level=excluded.level")) {
-                q.setString(1, player.toString()); q.setInt(2, level); q.executeUpdate();
-            }
-            if (resetPolicy.money()) {
-                try (PreparedStatement q = connection.prepareStatement("UPDATE players SET balance=?,revenue=0,expense=0 WHERE uuid=?")) {
-                    q.setDouble(1, startingBalance); q.setString(2, player.toString()); q.executeUpdate();
-                }
-            }
-            if (resetPolicy.machines()) try (PreparedStatement q = connection.prepareStatement("DELETE FROM machines WHERE owner_uuid=?")) {
-                q.setString(1, player.toString()); q.executeUpdate();
-            }
-            if (resetPolicy.warehouse()) try (PreparedStatement q = connection.prepareStatement("DELETE FROM warehouses WHERE owner_uuid=?")) {
-                q.setString(1, player.toString()); q.executeUpdate();
-            }
-            if (resetPolicy.energy()) try (PreparedStatement q = connection.prepareStatement("DELETE FROM player_energy WHERE owner_uuid=?")) {
-                q.setString(1, player.toString()); q.executeUpdate();
-            }
-            if (resetPolicy.research()) try (PreparedStatement q = connection.prepareStatement("DELETE FROM research WHERE player_uuid=?")) {
-                q.setString(1, player.toString()); q.executeUpdate();
-            }
-            if (resetPolicy.contracts()) try (PreparedStatement q = connection.prepareStatement("DELETE FROM contracts WHERE player_uuid=? AND completed=0")) {
-                q.setString(1, player.toString()); q.executeUpdate();
-            }
-            if (resetPolicy.employees()) {
-                try (PreparedStatement q = connection.prepareStatement(
-                        "DELETE FROM employees WHERE company_id IN (SELECT company_id FROM company_members WHERE player_uuid=?)")) {
-                    q.setString(1, player.toString()); q.executeUpdate();
-                }
-            }
-            try (PreparedStatement q = connection.prepareStatement(
-                    "INSERT INTO transactions(player_uuid,type,amount,note,created_at) VALUES(?,?,?,?,?)")) {
-                q.setString(1, player.toString()); q.setString(2, "PRESTIGE");
-                q.setDouble(3, currentBalance); q.setString(4, "level=" + level);
-                q.setLong(5, System.currentTimeMillis() / 1000); q.executeUpdate();
-            }
-            connection.commit();
-            return new Result(true, level, "prestige-complete");
-        } catch (SQLException | RuntimeException ex) {
-            connection.rollback();
-            throw ex;
-        } finally {
-            connection.setAutoCommit(oldAuto);
+    public int level(UUID player) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement("SELECT level FROM prestige WHERE player_uuid=?")) {
+            statement.setString(1, player.toString());
+            try (ResultSet rows = statement.executeQuery()) { return rows.next() ? Math.max(0, rows.getInt(1)) : 0; }
         }
     }
 
-    public double productionMultiplier(int level, double bonusPerLevel) {
-        if (level < 0 || !Double.isFinite(bonusPerLevel) || bonusPerLevel < 0) throw new IllegalArgumentException("Invalid prestige bonus");
-        return 1.0 + level * bonusPerLevel;
+    public PrestigeResult prestige(UUID player, double companyValue, long nowEpochSeconds) throws SQLException {
+        Objects.requireNonNull(player, "player");
+        if (!config.getBoolean("prestige.enabled", true)) return PrestigeResult.DISABLED;
+        double required = config.getDouble("prestige.minimum_company_value", 10_000_000_000d);
+        if (!Double.isFinite(companyValue) || companyValue < required) return PrestigeResult.REQUIREMENT_NOT_MET;
+        boolean priorAutoCommit = connection.getAutoCommit();
+        connection.setAutoCommit(false);
+        try {
+            int nextLevel = level(player) + 1;
+            if (config.getBoolean("prestige.reset.money", true)) {
+                double starting = config.getDouble("economy.starting_balance", 10_000);
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE players SET balance=?,revenue=0,expense=0 WHERE uuid=?")) {
+                    statement.setDouble(1, Math.max(0, starting));
+                    statement.setString(2, player.toString());
+                    if (statement.executeUpdate() != 1) {
+                        connection.rollback();
+                        return PrestigeResult.PLAYER_NOT_FOUND;
+                    }
+                }
+            }
+            if (config.getBoolean("prestige.reset.machines", true)) {
+                try (PreparedStatement statement = connection.prepareStatement("DELETE FROM machines WHERE owner_uuid=?")) {
+                    statement.setString(1, player.toString()); statement.executeUpdate();
+                }
+            }
+            if (config.getBoolean("prestige.reset.warehouse", true)) {
+                try (PreparedStatement statement = connection.prepareStatement("DELETE FROM warehouses WHERE owner_uuid=?")) {
+                    statement.setString(1, player.toString()); statement.executeUpdate();
+                }
+            }
+            if (config.getBoolean("prestige.reset.research", true)) {
+                try (PreparedStatement statement = connection.prepareStatement("DELETE FROM research WHERE player_uuid=?")) {
+                    statement.setString(1, player.toString()); statement.executeUpdate();
+                }
+            }
+            if (config.getBoolean("prestige.reset.employees", true)) {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM employees WHERE company_id IN (SELECT id FROM companies WHERE owner_uuid=?)")) {
+                    statement.setString(1, player.toString()); statement.executeUpdate();
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO prestige(player_uuid,level) VALUES(?,?) ON CONFLICT(player_uuid) DO UPDATE SET level=excluded.level")) {
+                statement.setString(1, player.toString()); statement.setInt(2, nextLevel); statement.executeUpdate();
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO transactions(player_uuid,type,amount,note,created_at) VALUES(?,?,?,?,?)")) {
+                statement.setString(1, player.toString()); statement.setString(2, "PRESTIGE");
+                statement.setDouble(3, 0); statement.setString(4, "level=" + nextLevel);
+                statement.setLong(5, nowEpochSeconds); statement.executeUpdate();
+            }
+            connection.commit();
+            return PrestigeResult.success(nextLevel);
+        } catch (SQLException | RuntimeException exception) {
+            connection.rollback();
+            throw exception;
+        } finally {
+            connection.setAutoCommit(priorAutoCommit);
+        }
     }
 
-    public record ResetPolicy(boolean money, boolean machines, boolean warehouse, boolean energy,
-                              boolean research, boolean contracts, boolean employees) { }
-    public record Result(boolean success, int level, String reason) { }
+    public double productionBonus(UUID player) throws SQLException {
+        int level = level(player);
+        return Math.max(0, config.getDouble("prestige.bonuses.production_per_level", 0.05)) * level;
+    }
+
+    public double revenueBonus(UUID player) throws SQLException {
+        int level = level(player);
+        return Math.max(0, config.getDouble("prestige.bonuses.revenue_per_level", 0.02)) * level;
+    }
+
+    public record PrestigeResult(boolean success, int newLevel, Reason reason) {
+        static PrestigeResult success(int level) { return new PrestigeResult(true, level, Reason.SUCCESS); }
+        static PrestigeResult of(Reason reason) { return new PrestigeResult(false, 0, reason); }
+        static final PrestigeResult DISABLED = of(Reason.DISABLED);
+        static final PrestigeResult REQUIREMENT_NOT_MET = of(Reason.REQUIREMENT_NOT_MET);
+        static final PrestigeResult PLAYER_NOT_FOUND = of(Reason.PLAYER_NOT_FOUND);
+    }
+    public enum Reason { SUCCESS, DISABLED, REQUIREMENT_NOT_MET, PLAYER_NOT_FOUND }
 }
