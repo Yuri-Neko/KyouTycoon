@@ -18,6 +18,7 @@ final class Database {
             s.executeUpdate("CREATE TABLE IF NOT EXISTS players(uuid TEXT PRIMARY KEY,name TEXT NOT NULL,balance REAL NOT NULL,revenue REAL NOT NULL DEFAULT 0,expense REAL NOT NULL DEFAULT 0,last_seen INTEGER NOT NULL)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS plots(id INTEGER PRIMARY KEY,world TEXT NOT NULL,min_x INTEGER,max_x INTEGER,min_z INTEGER,max_z INTEGER,owner_uuid TEXT,level INTEGER,created_at INTEGER)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS warehouses(owner_uuid TEXT PRIMARY KEY,capacity INTEGER NOT NULL,items TEXT NOT NULL)");
+            s.executeUpdate("CREATE TABLE IF NOT EXISTS player_energy(owner_uuid TEXT PRIMARY KEY,stored INTEGER NOT NULL,capacity INTEGER NOT NULL)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS machines(uuid TEXT PRIMARY KEY,owner_uuid TEXT,world TEXT,x INTEGER,y INTEGER,z INTEGER,machine_type TEXT,level INTEGER,state TEXT,progress REAL,created_at INTEGER,last_processed INTEGER)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS companies(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT UNIQUE,owner_uuid TEXT,revenue REAL DEFAULT 0,assets REAL DEFAULT 0,reputation INTEGER DEFAULT 50,created_at INTEGER)");
             s.executeUpdate("CREATE TABLE IF NOT EXISTS company_members(company_id INTEGER,player_uuid TEXT UNIQUE,role TEXT,joined_at INTEGER,PRIMARY KEY(company_id,player_uuid))");
@@ -31,5 +32,14 @@ final class Database {
         }
     }
     Connection c(){return c;} ExecutorService executor(){return executor;}
-    void close(){executor.shutdown();try{if(c!=null)c.close();}catch(SQLException ignored){}}
+    void close(){
+        executor.shutdown();
+        try{
+            if(!executor.awaitTermination(10,TimeUnit.SECONDS))executor.shutdownNow();
+        }catch(InterruptedException e){
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        try{if(c!=null)c.close();}catch(SQLException ignored){}
+    }
 }
