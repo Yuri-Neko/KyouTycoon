@@ -32,7 +32,19 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     String msg(String key,Map<String,?> vals){String s=config.messages().getString(key,"&cMissing message: "+key);java.util.HashMap<String,Object> m=new java.util.HashMap<>(vals);m.put("prefix",config.messages().getString("prefix","&8[&aKyouTycoon&8] "));for(var e:m.entrySet())s=s.replace("{"+e.getKey()+"}",String.valueOf(e.getValue()));return ChatColor.translateAlternateColorCodes('&',s);}
     ConfigManager config(){return config;} TycoonService service(){return service;} TycoonWorld world(){return world;} GUI gui(){return gui;}
 
-    @EventHandler public void join(PlayerJoinEvent e){service.markOnline(e.getPlayer().getUniqueId());service.ensurePlayer(e.getPlayer());}
+    @EventHandler public void join(PlayerJoinEvent e){
+        Player player=e.getPlayer();
+        service.markOnline(player.getUniqueId());
+        service.ensurePlayer(player);
+        if(getConfig().getBoolean("plot.starting_claim",true)&&service.plot(player.getUniqueId())==null){
+            TycoonService.Plot q=service.claim(player.getUniqueId());
+            if(q!=null){
+                World plotWorld=Bukkit.getWorld(q.world);
+                if(plotWorld!=null)player.teleport(new Location(plotWorld,q.minX+(q.maxX-q.minX+1)/2.0,65,q.minZ+(q.maxZ-q.minZ+1)/2.0));
+                player.sendMessage(msg("plot_claimed",Map.of("plot",q.id)));
+            }
+        }
+    }
     @EventHandler public void quit(PlayerQuitEvent e){service.markOffline(e.getPlayer().getUniqueId());service.savePlayer(e.getPlayer().getUniqueId());}
     @EventHandler public void interact(PlayerInteractEvent e){
         Block b=e.getClickedBlock();
