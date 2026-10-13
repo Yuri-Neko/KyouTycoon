@@ -53,9 +53,9 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
         }
     }
     @EventHandler public void place(BlockPlaceEvent e){
-        if(!isProtectedArea(e.getPlayer(),e.getBlock().getWorld(),e.getBlockX(),e.getBlockZ()))return;
+        if(!isProtectedArea(e.getPlayer(),e.getBlock().getWorld(),e.getBlock().getX(),e.getBlock().getZ()))return;
         if(!getConfig().getBoolean("world_protection.block_place",true))return;
-        TycoonService.Plot q=service.at(e.getBlock().getWorld(),e.getBlockX(),e.getBlockZ());
+        TycoonService.Plot q=service.at(e.getBlock().getWorld(),e.getBlock().getX(),e.getBlock().getZ());
         if(q==null||q.owner==null||!q.owner.equals(e.getPlayer().getUniqueId())){
             e.setCancelled(true);
             e.getPlayer().sendMessage(msg(q==null?"road_protected":"not_your_plot"));
