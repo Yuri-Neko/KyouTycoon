@@ -1,0 +1,42 @@
+name: Build and test
+
+on:
+  push:
+    branches: [main, "refactor/**"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.14"
+      - name: Verify YAML configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          files = list(Path("src/main/resources").glob("*.yml"))
+          assert files, "No YAML config files found"
+          for file in files:
+              with file.open(encoding="utf-8") as f:
+                  yaml.safe_load(f)
+              print(f"YAML OK: {file}")
+          PY
+      - name: Compile, test and build plugin
+        run: gradle --no-daemon clean test build
