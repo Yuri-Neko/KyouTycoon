@@ -1,4 +1,12 @@
 machines:
+  coal_generator:
+    enabled: true
+    block: FURNACE
+    display_name: '&6Coal Generator'
+    production_time: 10
+    energy_usage: 0
+    input: {}
+    output: {}
   wheat_farm:
     enabled: true
     block: FARMLAND
