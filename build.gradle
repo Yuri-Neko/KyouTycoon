@@ -1,8 +1,39 @@
 plugins { id 'java' }
-group='id.kyou'
-version='1.0.0'
-java { toolchain { languageVersion=JavaLanguageVersion.of(21) } }
-repositories { mavenCentral(); maven { url='https://repo.papermc.io/repository/maven-public/' } }
-dependencies { compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'; implementation 'org.xerial:sqlite-jdbc:3.50.3.0' }
-tasks.withType(JavaCompile).configureEach { options.encoding='UTF-8'; options.release=21 }
-processResources { filesMatching('plugin.yml') { expand(version: project.version) } }
+
+group = 'id.kyou'
+version = '1.0.0'
+
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+}
+
+dependencies {
+    compileOnly 'io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT'
+    implementation 'org.xerial:sqlite-jdbc:3.50.3.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.12.2'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+tasks.test {
+    useJUnitPlatform()
+}
+
+processResources {
+    filesMatching('plugin.yml') { expand(version: project.version) }
+}
+
+// SQLite JDBC is bundled into the plugin JAR; Paper API remains provided by the server.
+jar {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+    archiveFileName = "KyouTycoon-${project.version}.jar"
+}
