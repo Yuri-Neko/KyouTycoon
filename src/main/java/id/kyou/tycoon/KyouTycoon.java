@@ -23,7 +23,9 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
         if(getConfig().getBoolean("world.enabled",true))world.getOrCreate();
         long interval=Math.max(1,getConfig().getLong("machines.update_interval",20));getServer().getScheduler().runTaskTimer(this,service::processMachines,interval,interval);
         long market=Math.max(20,getConfig().getLong("market.price_update_interval",300)*20L);getServer().getScheduler().runTaskTimer(this,service::marketTick,market,market);
-        long save=Math.max(20,getConfig().getLong("performance.database_save_interval",300)*20L);getServer().getScheduler().runTaskTimerAsynchronously(this,service::saveAll,save,save);
+        long save=Math.max(20,getConfig().getLong("performance.database_save_interval",300)*20L);getServer().getScheduler().runTaskTimer(this,service::saveAll,save,save);
+        long contractCheck=Math.max(20,getConfig().getLong("contracts.check_interval",20)*20L);getServer().getScheduler().runTaskTimer(this,service::expireContracts,contractCheck,contractCheck);
+        long payroll=Math.max(60,getConfig().getLong("employees.pay_interval",3600))*20L;getServer().getScheduler().runTaskTimer(this,service::payEmployeePayroll,payroll,payroll);
         getLogger().info("KyouTycoon enabled.");
     }
     @Override public void onDisable(){if(service!=null)service.saveAll();if(database!=null)database.close();}
