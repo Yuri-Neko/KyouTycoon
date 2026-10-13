@@ -32,8 +32,8 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     String msg(String key,Map<String,?> vals){String s=config.messages().getString(key,"&cMissing message: "+key);java.util.HashMap<String,Object> m=new java.util.HashMap<>(vals);m.put("prefix",config.messages().getString("prefix","&8[&aKyouTycoon&8] "));for(var e:m.entrySet())s=s.replace("{"+e.getKey()+"}",String.valueOf(e.getValue()));return ChatColor.translateAlternateColorCodes('&',s);}
     ConfigManager config(){return config;} TycoonService service(){return service;} TycoonWorld world(){return world;} GUI gui(){return gui;}
 
-    @EventHandler public void join(PlayerJoinEvent e){service.ensurePlayer(e.getPlayer());}
-    @EventHandler public void quit(PlayerQuitEvent e){service.savePlayer(e.getPlayer().getUniqueId());}
+    @EventHandler public void join(PlayerJoinEvent e){service.markOnline(e.getPlayer().getUniqueId());service.ensurePlayer(e.getPlayer());}
+    @EventHandler public void quit(PlayerQuitEvent e){service.markOffline(e.getPlayer().getUniqueId());service.savePlayer(e.getPlayer().getUniqueId());}
     @EventHandler public void interact(PlayerInteractEvent e){
         if(e.getClickedBlock()==null)return; Block b=e.getClickedBlock();TycoonService.Machine m=service.machine(b);if(m==null)return;e.setCancelled(true);
         if(!m.owner.equals(e.getPlayer().getUniqueId())){e.getPlayer().sendMessage(msg("not_your_plot"));return;}gui.machine(e.getPlayer(),m);
