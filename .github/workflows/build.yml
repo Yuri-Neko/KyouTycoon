@@ -38,6 +38,8 @@ jobs:
                   yaml.safe_load(f)
               print(f"YAML OK: {file}")
           PY
+      - name: Compile, test and build plugin
+        run: gradle --no-daemon clean test build
       - name: Report JUnit failures
         if: always()
         run: |
@@ -54,5 +56,12 @@ jobs:
                       print(problem.get("message", ""))
                       print((problem.text or "")[-5000:])
           PY
-      - name: Compile, test and build plugin
-        run: gradle --no-daemon clean test build
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/test
+            build/test-results/test
+          if-no-files-found: ignore
