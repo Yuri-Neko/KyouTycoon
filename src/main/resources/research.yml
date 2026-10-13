@@ -1,3 +1,19 @@
 research:
-  automation_1: {name: '&bAutomation I', cost: 500000, production_speed: 0.10, prerequisites: []}
-  automation_2: {name: '&bAutomation II', cost: 2500000, production_speed: 0.20, prerequisites: [automation_1]}
+  automation_1:
+    enabled: true
+    name: "&bAutomation I"
+    cost: 500000
+    production_speed: 0.10
+    prerequisites: []
+  automation_2:
+    enabled: true
+    name: "&bAutomation II"
+    cost: 2500000
+    production_speed: 0.20
+    prerequisites: [automation_1]
+  advanced_logistics:
+    enabled: true
+    name: "&6Advanced Logistics"
+    cost: 5000000
+    production_speed: 0.05
+    prerequisites: [automation_2]

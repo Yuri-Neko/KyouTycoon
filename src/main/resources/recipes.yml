@@ -1,3 +1,17 @@
 recipes:
-  bread: {input: {WHEAT: 2}, output: {BREAD: 1}, time: 10}
-  iron: {input: {IRON_ORE: 10, COAL: 5}, output: {IRON_INGOT: 15}, time: 30}
+  bread:
+    input: {WHEAT: {amount: 2}}
+    output: {BREAD: {amount: 1}}
+    time: 10
+  iron:
+    input:
+      IRON_ORE: {amount: 10}
+      COAL: {amount: 5}
+    output: {IRON_INGOT: {amount: 15}}
+    time: 30
+  gold:
+    input:
+      RAW_GOLD: {amount: 10}
+      COAL: {amount: 5}
+    output: {GOLD_INGOT: {amount: 12}}
+    time: 45

@@ -8,3 +8,6 @@ sell:
   REDSTONE: {price: 75}
   QUARTZ: {price: 150}
   CAKE: {price: 1000}
+  COAL: {price: 15}
+  IRON_ORE: {price: 100}
+  RAW_GOLD: {price: 200}

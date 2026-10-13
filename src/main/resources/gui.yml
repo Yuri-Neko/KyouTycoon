@@ -1,5 +1,20 @@
 titles:
-  main: '&8KyouTycoon'
-  machine: '&8Machine'
-  warehouse: '&8Warehouse'
-  market: '&8Market'
+  main: "&8KyouTycoon"
+  economy: "&8Economy"
+  plot: "&8Your Plot"
+  machines: "&8Your Machines"
+  machine: "&8Machine"
+  warehouse: "&8Warehouse"
+  energy: "&8Energy"
+  employees: "&8Employees"
+  research: "&8Research"
+  market: "&8Market"
+  contracts: "&8Contracts"
+  company: "&8Company"
+  achievements: "&8Achievements"
+  prestige: "&8Prestige"
+main_size: 27
+machine_size: 27
+warehouse_size: 54
+market_size: 54
+company_size: 27

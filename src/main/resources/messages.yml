@@ -1,33 +1,50 @@
-prefix: '&8[&aKyouTycoon&8] '
-player_only: '{prefix}&cPlayer only.'
-no_permission: '{prefix}&cNo permission.'
-reload: '{prefix}&aConfiguration reloaded.'
-plot_claimed: '{prefix}&aPlot &f#{plot} &aclaimed.'
-plot_already_owned: '{prefix}&cYou already own a plot.'
-no_plot: '{prefix}&cYou do not own a plot.'
-no_empty_plot: '{prefix}&cNo empty plot.'
-not_your_plot: '{prefix}&cThis is not your plot.'
-plot_upgraded: '{prefix}&aPlot upgraded to level &f{level}&a.'
-insufficient_money: '{prefix}&cInsufficient money.'
-invalid_amount: '{prefix}&cInvalid amount.'
-payment_sent: '{prefix}&aPaid &f${amount} &ato &f{player}&a.'
-payment_received: '{prefix}&aReceived &f${amount} &afrom &f{player}&a.'
-warehouse_full: '{prefix}&cWarehouse full.'
-world_created: '{prefix}&aTycoon world created.'
-world_exists: '{prefix}&eTycoon world already exists.'
-company_created: '{prefix}&aCompany &f{name} &acreated.'
-company_exists: '{prefix}&cYou already have a company.'
-company_not_found: '{prefix}&cCompany not found.'
-invite_sent: '{prefix}&aInvitation sent.'
-invite_received: '{prefix}&aYou were invited to &f{name}&a.'
-invalid_player: '{prefix}&cPlayer not found.'
-prestige_unavailable: '{prefix}&cPrestige requirement not met.'
-prestige_done: '{prefix}&aPrestige complete: &f{level}'
-debug: '{prefix}&7Players: &f{players}&7 Machines: &f{machines}&7 Plots: &f{plots}'
-
-warehouse_transfer_failed: '{prefix}&cTransfer gagal. Periksa jumlah item, kapasitas, dan slot inventory.'
-warehouse_deposit: '{prefix}&aDisimpan &f{amount} {material} &ake warehouse.'
-warehouse_withdraw: '{prefix}&aDiambil &f{amount} {material} &adari warehouse.'
-market_sell_failed: '{prefix}&cPenjualan gagal. Item belum ada di warehouse atau tidak tersedia di shop.'
-market_sold: '{prefix}&aTerjual &f{amount} {material}&a dari warehouse.'
-road_protected: '{prefix}&cJalan dan hub dilindungi. Bangun hanya di plot milikmu.'
+prefix: "&8[&aKyouTycoon&8] "
+player_only: "{prefix}&cPlayer only."
+no_permission: "{prefix}&cNo permission."
+reload: "{prefix}&aConfiguration reloaded."
+plot_claimed: "{prefix}&aPlot &f#{plot} &aclaimed."
+plot_already_owned: "{prefix}&cYou already own a plot."
+no_plot: "{prefix}&cYou do not own a plot."
+no_empty_plot: "{prefix}&cNo empty plot."
+not_your_plot: "{prefix}&cThis is not your plot."
+road_protected: "{prefix}&cRoads and the hub are protected. Build on your own plot."
+plot_upgraded: "{prefix}&aPlot upgraded to level &f{level}&a."
+insufficient_money: "{prefix}&cInsufficient money."
+invalid_amount: "{prefix}&cInvalid amount."
+invalid_player: "{prefix}&cPlayer not found."
+payment_sent: "{prefix}&aPaid &f$ {amount} &ato &f{player}&a."
+payment_received: "{prefix}&aReceived &f$ {amount} &afrom &f{player}&a."
+warehouse_full: "{prefix}&cWarehouse full."
+warehouse_transfer_failed: "{prefix}&cTransfer failed. Check item amount, capacity, and inventory slots."
+warehouse_deposit: "{prefix}&aDeposited &f{amount} {material} &ainto your warehouse."
+warehouse_withdraw: "{prefix}&aWithdrew &f{amount} {material} &afrom your warehouse."
+world_created: "{prefix}&aTycoon world created."
+world_exists: "{prefix}&eTycoon world already exists."
+company_created: "{prefix}&aCompany &f{name} &acreated."
+company_exists: "{prefix}&cYou already have a company."
+company_not_found: "{prefix}&cCompany not found."
+company_member_added: "{prefix}&aAdded &f{player} &ato your company."
+company_member_removed: "{prefix}&aRemoved &f{player} &afrom your company."
+company_left: "{prefix}&aYou left the company."
+company_no_permission: "{prefix}&cYou cannot manage company members."
+company_member_limit: "{prefix}&cYour company reached the member limit."
+invite_sent: "{prefix}&aCompany invite processed for &f{player}&a."
+invite_received: "{prefix}&aYou were invited to &f{name}&a."
+market_sell_failed: "{prefix}&cSale failed. Check warehouse stock and shop availability."
+market_sold: "{prefix}&aSold &f{amount} {material}&a."
+research_unlocked: "{prefix}&aResearch unlocked: &f{research}&a."
+research_already_unlocked: "{prefix}&eResearch already unlocked."
+research_missing_prerequisite: "{prefix}&cUnlock the prerequisites first."
+research_insufficient_funds: "{prefix}&cNot enough money for this research."
+research_unknown: "{prefix}&cUnknown research ID."
+research_locked: "{prefix}&cResearch is locked."
+contract_accepted: "{prefix}&aAccepted contract &f{contract}&a."
+contract_already_active: "{prefix}&eThat contract is already active."
+contract_not_found: "{prefix}&cContract not found or disabled."
+contract_complete: "{prefix}&aContract completed. Reward: &f{amount}&a."
+contract_incomplete: "{prefix}&cContract requirements are not complete yet."
+contract_expired: "{prefix}&cContract expired."
+prestige_unavailable: "{prefix}&cPrestige requirement not met."
+prestige_done: "{prefix}&aPrestige complete: &f{level}"
+achievement_unlocked: "{prefix}&6Achievement unlocked: &f{name}&6!"
+debug: "{prefix}&7Players: &f{players}&7 Machines: &f{machines}&7 Plots: &f{plots}"

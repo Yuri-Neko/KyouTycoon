@@ -1,3 +1,19 @@
 contracts:
-  bakery_contract: {requirement: {BREAD: 1000}, reward: 150000, reputation: 5, duration: 3600}
-  iron_contract: {requirement: {IRON_INGOT: 500}, reward: 125000, reputation: 4, duration: 3600}
+  bakery_contract:
+    enabled: true
+    requirement: {BREAD: 1000}
+    reward: 150000
+    reputation: 5
+    duration: 3600
+  iron_contract:
+    enabled: true
+    requirement: {IRON_INGOT: 500}
+    reward: 125000
+    reputation: 4
+    duration: 3600
+  gold_contract:
+    enabled: true
+    requirement: {GOLD_INGOT: 250}
+    reward: 300000
+    reputation: 8
+    duration: 7200

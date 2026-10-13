@@ -1,7 +1,11 @@
 plugin:
   debug: false
+  language: en_US
 database:
   file: kyoutycoon.db
+  busy_timeout_ms: 5000
+  journal_mode: WAL
+  synchronous: NORMAL
 world:
   enabled: true
   name: tycoon_world
@@ -11,21 +15,15 @@ world:
   plot_size: 100
   road_size: 7
   spawn_center: true
-  ground:
-    material: GRASS_BLOCK
+  ground: {material: GRASS_BLOCK}
   road:
     enabled: true
     material: STONE_BRICKS
     border_material: STONE
     center_material: WHITE_CONCRETE
     slab_material: STONE_SLAB
-  decoration:
-    enabled: true
-    material: OAK_LEAVES
-    height: 2
-  hub:
-    size: 15
-    material: STONE_BRICKS
+  decoration: {enabled: true, material: OAK_LEAVES, height: 2}
+  hub: {size: 7, material: STONE_BRICKS}
 world_protection:
   block_break: true
   block_place: true
@@ -42,7 +40,12 @@ plot:
 economy:
   starting_balance: 10000
   tax_rate: 0.0
+  maximum_transfer: 1000000000.0
+player:
+  autosave_on_quit: true
+  create_profile_on_join: true
 offline_machine:
+  # false = owner offline but machine continues, true = machine pauses while owner is offline.
   player_offline: false
   maximum_offline_time: 21600
   consume_energy: true
@@ -53,22 +56,38 @@ machines:
   update_interval: 20
   processing_batch: 100
   max_loaded_machines: 10000
+  maximum_cycles_per_machine_pass: 100
 warehouse:
   starting_capacity: 500
-  upgrades: {1: {capacity: 500, cost: 0}, 2: {capacity: 2500, cost: 100000}, 3: {capacity: 10000, cost: 1000000}, 4: {capacity: 50000, cost: 10000000}, 5: {capacity: 250000, cost: 100000000}}
+  upgrades:
+    1: {capacity: 500, cost: 0}
+    2: {capacity: 2500, cost: 100000}
+    3: {capacity: 10000, cost: 1000000}
+    4: {capacity: 50000, cost: 10000000}
+    5: {capacity: 250000, cost: 100000000}
 energy:
   enabled: true
   default_capacity: 100
   generators:
-    coal_generator: {block: FURNACE, production: 100, fuel: {COAL: 100}}
+    coal_generator:
+      block: FURNACE
+      production: 100
+      fuel: {COAL: 100}
+shop:
+  enabled: true
+  minimum_sale_amount: 1
+  maximum_sale_amount: 100000
 market:
   enabled: true
   dynamic_price: true
   minimum_price_multiplier: 0.50
   maximum_price_multiplier: 2.00
   price_update_interval: 300
+  demand_change_per_10000_items: 0.20
 employees:
+  enabled: true
   pay_interval: 3600
+  pay_employee_when_owner_offline: true
   worker: {salary: 500, production_bonus: 0.05}
   engineer: {salary: 2000, production_speed_bonus: 0.10}
   manager: {salary: 5000, revenue_bonus: 0.10}
@@ -78,9 +97,18 @@ research:
 company:
   enabled: true
   max_members: 20
+  minimum_name_length: 3
+  maximum_name_length: 24
 contracts:
   enabled: true
-reputation: {starting: 50, minimum: 0, maximum: 100}
+  check_interval: 20
+  default_duration: 3600
+reputation:
+  starting: 50
+  minimum: 0
+  maximum: 100
+  success_bonus: 5
+  failure_penalty: 10
 prestige:
   enabled: true
   minimum_company_value: 10000000000
@@ -89,13 +117,39 @@ prestige:
   bonuses: {production_per_level: 0.05, revenue_per_level: 0.02}
 achievements:
   enabled: true
+  items:
+    first_plot: {enabled: true, name: "&aFirst Plot", description: "Claim your first plot."}
+    first_machine: {enabled: true, name: "&eFirst Machine", description: "Register your first machine."}
+    millionaire: {enabled: true, name: "&6Millionaire", description: "Reach one million in balance."}
+    industrialist: {enabled: true, name: "&bIndustrialist", description: "Own ten machines."}
+    tycoon: {enabled: true, name: "&dTycoon", description: "Reach ten million in balance."}
 gui:
   main_size: 27
   machine_size: 27
   warehouse_size: 54
+  market_size: 54
+  company_size: 27
+  filler: {enabled: false, material: GRAY_STAINED_GLASS_PANE}
+notifications:
+  join_message: true
+  plot_claimed: true
+  machine_finished: false
+  offline_production_summary: true
+  achievement_unlocked: true
+conveyor:
+  enabled: false
+  block: HOPPER
+  speed: 1.0
+  maximum_items_per_plot: 100
 performance:
   async_database: true
   batch_database_save: true
   database_save_interval: 300
   machine_processing_batch: 100
   max_loaded_machines: 10000
+  async_contract_progress: true
+  cache_player_profiles: true
+debug:
+  log_database_queries: false
+  log_machine_processing: false
+  log_plot_generation: false

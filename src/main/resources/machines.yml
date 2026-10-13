@@ -2,7 +2,7 @@ machines:
   coal_generator:
     enabled: true
     block: FURNACE
-    display_name: '&6Coal Generator'
+    display_name: "&6Coal Generator"
     production_time: 10
     energy_usage: 0
     input: {}
@@ -10,35 +10,44 @@ machines:
   wheat_farm:
     enabled: true
     block: FARMLAND
-    display_name: '&eWheat Farm'
+    display_name: "&eWheat Farm"
     production_time: 10
     energy_usage: 0
     input: {}
-    output: {WHEAT: 5}
+    output:
+      WHEAT: {amount: 5}
   mill:
     enabled: true
     block: STONECUTTER
-    display_name: '&6Mill'
+    display_name: "&6Mill"
     production_time: 10
     energy_usage: 5
-    input: {WHEAT: 2}
-    output: {BREAD: 1}
+    input:
+      WHEAT: {amount: 2}
+    output:
+      BREAD: {amount: 1}
   iron_factory:
     enabled: true
     block: BLAST_FURNACE
-    display_name: '&7Iron Factory'
+    display_name: "&7Iron Factory"
     production_time: 30
     energy_usage: 20
-    input: {IRON_ORE: 10, COAL: 5}
-    output: {IRON_INGOT: 15}
+    input:
+      IRON_ORE: {amount: 10}
+      COAL: {amount: 5}
+    output:
+      IRON_INGOT: {amount: 15}
   gold_factory:
     enabled: true
     block: BLAST_FURNACE
-    display_name: '&6Gold Factory'
+    display_name: "&6Gold Factory"
     production_time: 45
     energy_usage: 30
-    input: {RAW_GOLD: 10, COAL: 5}
-    output: {GOLD_INGOT: 12}
+    input:
+      RAW_GOLD: {amount: 10}
+      COAL: {amount: 5}
+    output:
+      GOLD_INGOT: {amount: 12}
 upgrade:
   max_level: 5
   levels:
