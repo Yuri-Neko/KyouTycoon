@@ -246,7 +246,7 @@ final class TycoonService {
             boolean blocked=false;
             long cappedCycles=Math.min(cycles,Math.max(1,p.getConfig().getInt("machines.processing_batch",100)));
             for(long i=0;i<cappedCycles;i++){
-                if(!produce(m,d)){blocked=true;break;}
+                if(!(isGenerator(m.type)?produceEnergy(m):produce(m,d))){blocked=true;break;}
                 done++;
             }
             if(blocked){
@@ -260,6 +260,31 @@ final class TycoonService {
             m.lastProcessed=now;
             if(done>0)dirtyMachines.add(m.id);
         }
+    }
+    private boolean isGenerator(String type){return p.getConfig().getConfigurationSection("energy.generators."+type)!=null;}
+    private boolean produceEnergy(Machine m){
+        ConfigurationSection generator=p.getConfig().getConfigurationSection("energy.generators."+m.type);
+        if(generator==null)return false;
+        Energy buffer=energy(m.owner);
+        if(buffer.stored>=buffer.capacity){m.state=State.WAITING_OUTPUT;return false;}
+        ConfigurationSection fuel=generator.getConfigurationSection("fuel");
+        if(fuel==null||fuel.getKeys(false).isEmpty()){m.state=State.WAITING_INPUT;return false;}
+        Warehouse stock=warehouse(m.owner);
+        for(String key:fuel.getKeys(false)){
+            Material material=Material.matchMaterial(key);
+            if(material==null||stock.amount(material)<1)continue;
+            Object raw=fuel.get(key);
+            int energyPerItem=raw instanceof ConfigurationSection nested?nested.getInt("energy",100):fuel.getInt(key,100);
+            if(energyPerItem<1)continue;
+            if(!stock.remove(material,1))continue;
+            buffer.add(energyPerItem);
+            dirtyWarehouses.add(m.owner);
+            dirtyEnergies.add(m.owner);
+            m.state=State.RUNNING;
+            return true;
+        }
+        m.state=State.WAITING_INPUT;
+        return false;
     }
     boolean produce(Machine m,MachineDef d){Warehouse w=warehouse(m.owner);for(var e:d.input.entrySet())if(w.amount(e.getKey())<e.getValue()){m.state=State.WAITING_INPUT;return false;}double om=p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".output_multiplier",1);for(var e:d.output.entrySet())if(w.total()+(int)Math.ceil(e.getValue()*om)>w.capacity){m.state=State.WAITING_OUTPUT;return false;}int energy=(int)Math.ceil(d.energy*p.getConfigManager().machines().getDouble("upgrade.levels."+m.level+".energy_multiplier",1));if(p.getConfig().getBoolean("energy.enabled",true)&&!energy(m.owner).consume(energy)){m.state=State.NO_POWER;return false;}
         if(energy>0)dirtyEnergies.add(m.owner);
