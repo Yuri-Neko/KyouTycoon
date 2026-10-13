@@ -108,7 +108,7 @@ public final class KyouTycoon extends JavaPlugin implements Listener {
     }
     private boolean isPlayerAttack(org.bukkit.entity.Entity damager){
         if(damager instanceof Player)return true;
-        if(damager instanceof org.bukkit.entity.projectile.Projectile projectile)
+        if(damager instanceof org.bukkit.entity.Projectile projectile)
             return projectile.getShooter() instanceof Player;
         return false;
     }
