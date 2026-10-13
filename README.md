@@ -6,16 +6,15 @@ Standalone Minecraft Java Edition Tycoon plugin for Paper. Core technology: Java
 
 - Java 21
 - Paper for Minecraft 1.21.x
-- Gradle 8.14 or a compatible Gradle 8.x installation
-- Network access on the first build so Gradle can download dependencies
+- Java 21 and network access on the first build. The included bootstrap scripts download the pinned Gradle 8.14 distribution if it is not already available.
 
 ## Build and test
 
 ```bash
-gradle --no-daemon clean test build
+./gradlew --no-daemon clean test build
 ```
 
-The same command runs in GitHub Actions on every push and pull request. It validates the YAML files, compiles the plugin and runs JUnit tests.
+The included `gradlew` (Linux/macOS) and `gradlew.bat` (Windows) bootstrap Gradle 8.14 on first use, or use an already installed matching Gradle version. The same command runs in GitHub Actions on every push and pull request. It validates the YAML files, compiles the plugin and runs JUnit tests.
 
 Output JAR:
 

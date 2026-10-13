@@ -39,7 +39,7 @@ jobs:
               print(f"YAML OK: {file}")
           PY
       - name: Compile, test and build plugin
-        run: gradle --no-daemon clean test build
+        run: ./gradlew --no-daemon clean test build
       - name: Report JUnit failures
         if: always()
         run: |
